@@ -481,7 +481,7 @@ bool DOS_Shell::Execute(char * name,char * args) {
 
 		CommandTail cmdtail;
 		cmdtail.count = static_cast<uint8_t>(line_len);
-		static_assert(sizeof(cmdtail.buffer) == cmd_buf_size);
+		static_assert(sizeof(cmdtail.buffer) == cmd_buf_size, ""); // TODO
 		memset(&cmdtail.buffer, 0, sizeof(cmdtail.buffer));
 		safe_strcpy(cmdtail.buffer, line);
 		cmdtail.buffer[line_len] = '\r';
