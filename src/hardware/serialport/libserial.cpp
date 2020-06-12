@@ -378,27 +378,26 @@ bool SERIAL_sendchar(COMPORT port, char data) {
 	else return false;
 }
 
-int SERIAL_getextchar(COMPORT port) {
+int SERIAL_getextchar(COMPORT port)
+{
 	unsigned char chRead = 0;
 	int dwRead = 0;
 	unsigned char error = 0;
 	int retval = 0;
 
-	dwRead=read(port->porthandle,&chRead,1);
-	if (dwRead==1) {
-		if(chRead==0xff) // error escape
-		{
-			dwRead=read(port->porthandle,&chRead,1);
-			if(chRead==0x00) // an error 
-			{
-				dwRead=read(port->porthandle,&chRead,1);
-				if(chRead==0x0) error=SERIAL_BREAK_ERR;
-				else error=SERIAL_FRAMING_ERR;
+	dwRead = read(port->porthandle, &chRead, 1);
+	if (dwRead == 1) {
+		if (chRead == 0xff) { // error escape
+			read(port->porthandle, &chRead, 1);
+			if (chRead == 0x00) { // an error
+				read(port->porthandle, &chRead, 1);
+				error = (chRead == 0x00) ? SERIAL_BREAK_ERR
+				                         : SERIAL_FRAMING_ERR;
 			}
 		}
-		retval |= (error<<8);
+		retval |= (error << 8);
 		retval |= chRead;
-		retval |= 0x10000; 
+		retval |= 0x10000;
 	}
 	return retval;
 }
