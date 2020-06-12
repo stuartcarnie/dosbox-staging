@@ -468,14 +468,24 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		/* HACK: Store full commandline for mount and imgmount */
 		full_arguments.assign(line);
 
-		/* Fill the command line */
+		/* Fill DOS Program Segment Prefix commandline tail.
+		 *
+		 * It's a buffer of max 127 characters ending with 0x0d (with
+		 * remainging bytes, if there are any, set to zero).
+		 */
+		constexpr size_t cmd_buf_size = 127;
+		if (strlen(line) >= cmd_buf_size)
+			line[cmd_buf_size - 1] = '\0';
+		const size_t line_len = strlen(line);
+		assert(line_len < cmd_buf_size);
+
 		CommandTail cmdtail;
-		cmdtail.count = 0;
-		memset(&cmdtail.buffer,0,127); //Else some part of the string is unitialized (valgrind)
-		if (strlen(line)>126) line[126]=0;
-		cmdtail.count=(Bit8u)strlen(line);
-		memcpy(cmdtail.buffer,line,strlen(line));
-		cmdtail.buffer[strlen(line)]=0xd;
+		cmdtail.count = static_cast<uint8_t>(line_len);
+		static_assert(sizeof(cmdtail.buffer) == cmd_buf_size);
+		memset(&cmdtail.buffer, 0, sizeof(cmdtail.buffer));
+		safe_strcpy(cmdtail.buffer, line);
+		cmdtail.buffer[line_len] = '\r';
+
 		/* Copy command line in stack block too */
 		MEM_BlockWrite(SegPhys(ss)+reg_sp+0x100,&cmdtail,128);
 
