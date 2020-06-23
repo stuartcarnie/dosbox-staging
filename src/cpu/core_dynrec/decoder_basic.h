@@ -502,6 +502,7 @@ static INLINE void dyn_set_eip_end(HostReg reg,Bit32u imm=0) {
 	gen_mov_word_to_reg(reg,&reg_eip,true); //get_extend_word will mask off the upper bits
 	//gen_mov_word_to_reg(reg,&reg_eip,decode.big_op);
 	gen_add_imm(reg,(Bit32u)(decode.code-decode.code_start+imm));
+	if (!decode.big_op) gen_extend_word(false,reg);
 }
 
 
@@ -1001,10 +1002,10 @@ skip_extend_word:
 							// succeeded, use the pointer to avoid code invalidation
 							if (!addseg) {
 								if (!scaled_reg_used) {
-									gen_mov_LE_word_to_reg(ea_reg,(void*)val,true);
+									gen_mov_word_to_reg(ea_reg,(void*)val,true);
 								} else {
 									DYN_LEA_MEM_REG_VAL(ea_reg,NULL,scaled_reg,scale,0);
-									gen_add_LE(ea_reg,(void*)val);
+									gen_add(ea_reg,(void*)val);
 								}
 							} else {
 								if (!scaled_reg_used) {
@@ -1012,7 +1013,7 @@ skip_extend_word:
 								} else {
 									DYN_LEA_SEG_PHYS_REG_VAL(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base),scaled_reg,scale,0);
 								}
-								gen_add_LE(ea_reg,(void*)val);
+								gen_add(ea_reg,(void*)val);
 							}
 							return;
 						}
@@ -1053,10 +1054,10 @@ skip_extend_word:
 						if (!addseg) {
 							if (!scaled_reg_used) {
 								MOV_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-								gen_add_LE(ea_reg,(void*)val);
+								gen_add(ea_reg,(void*)val);
 							} else {
 								DYN_LEA_REG_VAL_REG_VAL(ea_reg,base_reg,scaled_reg,scale,0);
-								gen_add_LE(ea_reg,(void*)val);
+								gen_add(ea_reg,(void*)val);
 							}
 						} else {
 							if (!scaled_reg_used) {
@@ -1065,7 +1066,7 @@ skip_extend_word:
 								DYN_LEA_SEG_PHYS_REG_VAL(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base),scaled_reg,scale,0);
 							}
 							ADD_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-							gen_add_LE(ea_reg,(void*)val);
+							gen_add(ea_reg,(void*)val);
 						}
 						return;
 					}
@@ -1130,11 +1131,11 @@ skip_extend_word:
 				// succeeded, use the pointer to avoid code invalidation
 				if (!addseg) {
 					MOV_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-					gen_add_LE(ea_reg,(void*)val);
+					gen_add(ea_reg,(void*)val);
 				} else {
 					MOV_SEG_PHYS_TO_HOST_REG(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base));
 					ADD_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-					gen_add_LE(ea_reg,(void*)val);
+					gen_add(ea_reg,(void*)val);
 				}
 				return;
 			}
