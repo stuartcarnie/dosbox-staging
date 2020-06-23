@@ -10,7 +10,6 @@ TYPES+=(release debug warnmore pgotrain fdotrain optinfo
         asan uasan usan tsan)
 
 cflags+=(-fstack-protector -fdiagnostics-color=auto)
-cflags_debug+=("${cflags[@]}" -g -fno-omit-frame-pointer)
 
 # Note: associative-math is needed for vectorization of floating point
 #       calculations, which also relies on no-signed-zeros and
@@ -19,12 +18,15 @@ cflags_release+=("${cflags[@]}" -DNDEBUG -O3 -fstrict-aliasing
                  -fno-signed-zeros -fno-trapping-math -fassociative-math
                  -frename-registers -ffunction-sections -fdata-sections)
 
+cflags_debug+=("${cflags[@]}" -g -fno-omit-frame-pointer)
+cxxonly_debug+=(-Wnon-virtual-dtor -Wextra-semi -Wcomma-subscript)
+
 cflags_warnmore+=("${cflags_debug[@]}" -pedantic -Wcast-align -Wdouble-promotion
                   -Wduplicated-branches -Wduplicated-cond -Wextra -Wformat=2
                   -Wlogical-op -Wmisleading-indentation -Wnull-dereference
                   -Wshadow -Wunused -fstrict-aliasing -Wstrict-aliasing=2)
 cxxonly_warnmore+=(-Weffc++ -Wnon-virtual-dtor -Woverloaded-virtual
-                   -Wuseless-cast)
+                   -Wuseless-cast -Wextra-semi -Wcomma-subscript)
 
 cflags_pgotrain+=("${cflags_debug[@]}" -pg -ftree-vectorize)
 
