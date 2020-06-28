@@ -28,6 +28,8 @@
 #include "mem.h"
 #endif
 
+#include "support.h"
+
 void FPU_ESC0_Normal(Bitu rm);
 void FPU_ESC0_EA(Bitu func,PhysPt ea);
 void FPU_ESC1_Normal(Bitu rm);
@@ -95,9 +97,6 @@ typedef struct FPU_rec {
 	FPU_Round	round;
 } FPU_rec;
 
-
-//get pi from a real library
-#define PI		3.14159265358979323846
 #define L2E		1.4426950408889634
 #define L2T		3.3219280948873623
 #define LN2		0.69314718055994531

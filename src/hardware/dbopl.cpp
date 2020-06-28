@@ -41,9 +41,7 @@
 #include <string.h>
 #include <type_traits>
 
-#ifndef PI
-#define PI 3.14159265358979323846
-#endif
+#include "support.h"
 
 namespace DBOPL {
 

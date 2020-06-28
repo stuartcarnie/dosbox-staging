@@ -18,9 +18,7 @@
 #include <stdarg.h>
 #endif
 
-#ifndef M_PI
-#define M_PI           3.14159265358979323846
-#endif
+#include "support.h"
 
 typedef Bit16s stream_sample_t;
 

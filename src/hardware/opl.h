@@ -61,8 +61,6 @@ typedef int8_t		Bit8s;
 
 #define FL05	((fltype)0.5)
 #define FL2		((fltype)2.0)
-#define PI		((fltype)3.1415926535897932384626433832795)
-
 
 #define FIXEDPT			0x10000		// fixed-point calculations using 16+16
 #define FIXEDPT_LFO		0x1000000	// fixed-point calculations using 8+24

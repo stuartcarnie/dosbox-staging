@@ -33,6 +33,8 @@
 
 #include <SDL.h>
 
+#define PI 3.141592653589793238462643383279f
+
 #ifdef _MSC_VER
 #define strcasecmp(a, b) _stricmp(a, b)
 #define strncasecmp(a, b, n) _strnicmp(a, b, n)
