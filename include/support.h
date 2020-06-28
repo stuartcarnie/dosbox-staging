@@ -33,7 +33,7 @@
 
 #include <SDL.h>
 
-#define PI 3.141592653589793238462643383279f
+#define PI 3.141592653589793238462643383279
 
 #ifdef _MSC_VER
 #define strcasecmp(a, b) _stricmp(a, b)
@@ -158,5 +158,8 @@ void strip_punctuation(std::string &str);
 
 bool starts_with(const std::string &prefix, const std::string &str) noexcept;
 bool ends_with(const std::string &suffix, const std::string &str) noexcept;
+
+double fast_sin(double rad);
+double fast_cos(double rad);
 
 #endif

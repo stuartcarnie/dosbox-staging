@@ -228,3 +228,26 @@ void E_Exit(const char * format,...) {
 
 	throw(buf);
 }
+
+// extremely fast sine and cosine approximations good to roughly four digits of
+// accuracy (suitable for 16-bit audio calculations, if needed). Credit:
+// Bhaskara I's sine approximation formula.
+double fast_sin(double rad)
+{
+	rad /= 2 * PI;
+	rad -= static_cast<int>(rad);
+
+	if (rad <= 0.5) {
+		const double t = 2 * rad * (2 * rad - 1);
+		return (PI * t) / ((PI - 4) * t - 1);
+	} else {
+		const double t = 2 * (1 - rad) * (1 - 2 * rad);
+		return -(PI * t) / ((PI - 4) * t - 1);
+	}
+}
+
+double fast_cos(double x)
+{
+	return fast_sin(x + 0.5 * PI);
+}
+
