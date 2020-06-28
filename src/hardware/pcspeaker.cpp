@@ -103,7 +103,18 @@ static void AddDelayEntry(float index,float vol) {
 		return;
 	}
 	spkr.entries[spkr.used].index=index;
-	spkr.entries[spkr.used].vol=vol;
+
+	const bool is_square_wave =
+	        ((spkr.pit_mode &&
+	          (spkr.prev_mode == SPKR_PIT_ON || spkr.mode == SPKR_PIT_ON)) ||
+	         (!spkr.prev_pos &&
+	          (static_cast<int>(spkr.prev_mode) + static_cast<int>(spkr.mode) ==
+	           SPKR_PIT_ON)));
+
+	if (is_square_wave)
+		vol *= Amplitude::square_wave_reducer;
+
+	spkr.entries[spkr.used].vol = vol;
 	spkr.used++;
 
 #if 0
