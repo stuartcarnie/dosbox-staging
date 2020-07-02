@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 #include "dc_silencer.h"
 #include "timer.h"
@@ -28,9 +29,35 @@
 #include "pic.h"
 
 #define SPKR_ENTRIES 1024
-#define SPKR_POSITIVE_VOLTAGE 5000.0f
-#define SPKR_NEUTRAL_VOLTAGE  0.0f
-#define SPKR_NEGATIVE_VOLTAGE -SPKR_POSITIVE_VOLTAGE
+
+/*
+Amplitude levels for the speaker are computed as follows:
+1. Start with the maximum allow level
+2. Reduce it by -5 LUFS to match generally upper-bound normalization
+   levels for normal audio. Knowing that the PC speaker hits peak
+   amplitude, we simply take off 5 dB.
+2. Given the PC speaker's PWM-mode doesn't actually produce sine
+   curves and instead are stepped approximations, we drop this by the
+   RMS level of a sine curve, which should provide roughly the same
+   perceived loudness.
+3. When the PC Speaker generates square waves, we apply the above reductions
+   again plus an additional RMS factor, knowing that square wave are
+   exclusively at full amplitude, and carry twice the power of sine waves.
+
+TODO: sqrt() and log() are not available as a constexpr in C++14,
+      so hard-code them for now.
+*/
+struct Amplitude {
+	static constexpr float minus_5db = 0.562341f;
+	static constexpr float sine_rms_v = 1.0f / 1.41421356237f; // 1/2^0.5
+	static constexpr float positive = std::numeric_limits<int16_t>::max() *
+	                                  minus_5db * sine_rms_v;
+	static constexpr float negative = std::numeric_limits<int16_t>::min() *
+	                                  minus_5db * sine_rms_v;
+	static constexpr float neutral = (positive + negative) / 2;
+	static constexpr float square_wave_reducer = minus_5db * sine_rms_v *
+	                                             sine_rms_v;
+};
 
 #define DC_SILENCER_WAVES   5u
 #define DC_SILENCER_WAVE_HZ 30u
@@ -46,7 +73,9 @@ static struct {
 	DelayEntry entries[SPKR_ENTRIES] = {};
 	DCSilencer dc_silencer = {};
 	MixerChannel *chan = nullptr;
+	SPKR_MODES prev_mode = SPKR_OFF;
 	SPKR_MODES mode = SPKR_OFF;
+	Bitu prev_pit_mode = 3;
 	Bitu pit_mode = 3;
 	Bitu rate = 0u;
 	Bitu min_tr = 0u;
@@ -61,6 +90,7 @@ static struct {
 	float volcur = 0.0f;
 	float last_index = 0.0f;
 	int16_t last_played_sample = 0;
+	uint16_t prev_pos = 0u;
 	uint8_t idle_countdown = 0u;
 } spkr;
 
@@ -76,8 +106,30 @@ static void AddDelayEntry(float index,float vol) {
 		return;
 	}
 	spkr.entries[spkr.used].index=index;
-	spkr.entries[spkr.used].vol=vol;
+
+	const bool is_square_wave =
+	        ((spkr.pit_mode &&
+	          (spkr.prev_mode == SPKR_PIT_ON || spkr.mode == SPKR_PIT_ON)) ||
+	         (!spkr.prev_pos &&
+	          (static_cast<int>(spkr.prev_mode) + static_cast<int>(spkr.mode) ==
+	           SPKR_PIT_ON)));
+
+	if (is_square_wave)
+		vol *= Amplitude::square_wave_reducer;
+
+	spkr.entries[spkr.used].vol = vol;
 	spkr.used++;
+
+#if 0
+	// This is extremely verbose; pipe the output to a file.
+	// Display the previous and current speaker modes w/ requested volume
+	if (fabs(vol) > Amplitude::neutral)
+		LOG_MSG("SPEAKER: Adding pos=%3s, pit=%" PRIuPTR "|%" PRIuPTR
+		        ", pwm=%d|%d, volume=%6.0f",
+		        spkr.prev_pos > 0 ? "yes" : "no", spkr.prev_pit_mode,
+		        spkr.pit_mode, spkr.prev_mode, spkr.mode,
+		        static_cast<double>(vol));
+#endif
 }
 
 static void ForwardPIT(float newindex) {
@@ -97,7 +149,7 @@ static void ForwardPIT(float newindex) {
 				if ((spkr.pit_index+passed)>=spkr.pit_max) {
 					float delay=spkr.pit_max-spkr.pit_index;
 					delay_base+=delay;passed-=delay;
-					spkr.pit_last = SPKR_NEGATIVE_VOLTAGE;
+					spkr.pit_last = Amplitude::negative;
 					if (spkr.mode==SPKR_PIT_ON) AddDelayEntry(delay_base,spkr.pit_last);
 					spkr.pit_index=0;
 				} else {
@@ -108,7 +160,7 @@ static void ForwardPIT(float newindex) {
 				if ((spkr.pit_index+passed)>=spkr.pit_half) {
 					float delay=spkr.pit_half-spkr.pit_index;
 					delay_base+=delay;passed-=delay;
-					spkr.pit_last = SPKR_POSITIVE_VOLTAGE;
+					spkr.pit_last = Amplitude::positive;
 					if (spkr.mode==SPKR_PIT_ON) AddDelayEntry(delay_base,spkr.pit_last);
 					spkr.pit_index=spkr.pit_half;
 				} else {
@@ -126,7 +178,7 @@ static void ForwardPIT(float newindex) {
 				if ((spkr.pit_index+passed)>=spkr.pit_max) {
 					float delay=spkr.pit_max-spkr.pit_index;
 					delay_base+=delay;passed-=delay;
-					spkr.pit_last = SPKR_POSITIVE_VOLTAGE;
+					spkr.pit_last = Amplitude::positive;
 					if (spkr.mode==SPKR_PIT_ON) AddDelayEntry(delay_base,spkr.pit_last);
 					spkr.pit_index=0;
 					/* Load the new count */
@@ -140,7 +192,7 @@ static void ForwardPIT(float newindex) {
 				if ((spkr.pit_index+passed)>=spkr.pit_half) {
 					float delay=spkr.pit_half-spkr.pit_index;
 					delay_base+=delay;passed-=delay;
-					spkr.pit_last = SPKR_NEGATIVE_VOLTAGE;
+					spkr.pit_last = Amplitude::negative;
 					if (spkr.mode==SPKR_PIT_ON) AddDelayEntry(delay_base,spkr.pit_last);
 					spkr.pit_index=spkr.pit_half;
 					/* Load the new count */
@@ -160,7 +212,7 @@ static void ForwardPIT(float newindex) {
 			if (spkr.pit_index+passed>=spkr.pit_max) {
 				float delay=spkr.pit_max-spkr.pit_index;
 				delay_base+=delay;passed-=delay;
-				spkr.pit_last = SPKR_NEGATIVE_VOLTAGE;
+				spkr.pit_last = Amplitude::negative;
 				if (spkr.mode==SPKR_PIT_ON) AddDelayEntry(delay_base,spkr.pit_last);				//No new events unless reprogrammed
 				spkr.pit_index=spkr.pit_max;
 			} else spkr.pit_index+=passed;
@@ -178,27 +230,29 @@ void PCSPEAKER_SetCounter(Bitu cntr, Bitu mode)
 
 	float newindex=PIC_TickIndex();
 	ForwardPIT(newindex);
+	spkr.prev_pit_mode = spkr.pit_mode;
+	spkr.pit_mode = mode;
 	switch (mode) {
 	case 0:		/* Mode 0 one shot, used with realsound */
 		if (spkr.mode!=SPKR_PIT_ON) return;
 		if (cntr>80) { 
 			cntr=80;
 		}
-		spkr.pit_last = ((float)cntr - 40) * (SPKR_POSITIVE_VOLTAGE / 40.0f);
+		spkr.pit_last = ((float)cntr - 40) * (Amplitude::positive / 40.0f);
 		AddDelayEntry(newindex,spkr.pit_last);
 		spkr.pit_index=0;
 		break;
 	case 1:
 		if (spkr.mode!=SPKR_PIT_ON) return;
-		spkr.pit_last = SPKR_POSITIVE_VOLTAGE;
-		AddDelayEntry(newindex,spkr.pit_last);
+		spkr.pit_last = Amplitude::positive;
+		AddDelayEntry(newindex, spkr.pit_last);
 		break;
 	case 2:			/* Single cycle low, rest low high generator */
 		spkr.pit_index=0;
-		spkr.pit_last = SPKR_NEGATIVE_VOLTAGE;
-		AddDelayEntry(newindex,spkr.pit_last);
-		spkr.pit_half=(1000.0f/PIT_TICK_RATE)*1;
-		spkr.pit_max=(1000.0f/PIT_TICK_RATE)*cntr;
+		spkr.pit_last = Amplitude::negative;
+		AddDelayEntry(newindex, spkr.pit_last);
+		spkr.pit_half = (1000.0f / PIT_TICK_RATE) * 1;
+		spkr.pit_max = (1000.0f / PIT_TICK_RATE) * cntr;
 		break;
 	case 3:		/* Square wave generator */
 		if (cntr==0 || cntr<spkr.min_tr) {
@@ -211,7 +265,7 @@ void PCSPEAKER_SetCounter(Bitu cntr, Bitu mode)
 		spkr.pit_new_half=spkr.pit_new_max/2;
 		break;
 	case 4:		/* Software triggered strobe */
-		spkr.pit_last = SPKR_POSITIVE_VOLTAGE;
+		spkr.pit_last = Amplitude::positive;
 		AddDelayEntry(newindex,spkr.pit_last);
 		spkr.pit_index=0;
 		spkr.pit_max=(1000.0f/PIT_TICK_RATE)*cntr;
@@ -222,8 +276,6 @@ void PCSPEAKER_SetCounter(Bitu cntr, Bitu mode)
 #endif
 		return;
 	}
-	spkr.pit_mode=mode;
-
 	// Activate the channel after queuing new speaker entries
 	spkr.chan->Enable(true);
 }
@@ -232,7 +284,7 @@ void PCSPEAKER_SetCounter(Bitu cntr, Bitu mode)
 // otherwise returns the fallback if the speaker is active.
 static float NeutralOr(float fallback)
 {
-	return !spkr.idle_countdown ? SPKR_NEUTRAL_VOLTAGE : fallback;
+	return !spkr.idle_countdown ? Amplitude::neutral : fallback;
 }
 
 // Returns, in order of preference:
@@ -241,8 +293,7 @@ static float NeutralOr(float fallback)
 // - The fallback voltage to kick start a new sound pattern 
 static float NeutralLastPitOr(float fallback)
 {
-	const bool use_last = std::isgreater(fabs(spkr.pit_last),
-	                                     SPKR_NEUTRAL_VOLTAGE);
+	const bool use_last = std::isgreater(fabs(spkr.pit_last), Amplitude::neutral);
 	return NeutralOr(use_last ? spkr.pit_last : fallback);
 }
 
@@ -252,24 +303,25 @@ void PCSPEAKER_SetType(Bitu mode)
 	if (!SpeakerExists())
 		return;
 
-	float newindex=PIC_TickIndex();
+	float newindex = PIC_TickIndex();
 	ForwardPIT(newindex);
+	spkr.prev_mode = spkr.mode;
 	switch (mode) {
 	case 0:
 		spkr.mode=SPKR_OFF;
-		AddDelayEntry(newindex, NeutralOr(SPKR_NEGATIVE_VOLTAGE));
+		AddDelayEntry(newindex, NeutralOr(Amplitude::negative));
 		break;
 	case 1:
 		spkr.mode=SPKR_PIT_OFF;
-		AddDelayEntry(newindex, NeutralOr(SPKR_NEGATIVE_VOLTAGE));
+		AddDelayEntry(newindex, NeutralOr(Amplitude::negative));
 		break;
 	case 2:
 		spkr.mode=SPKR_ON;
-		AddDelayEntry(newindex, NeutralOr(SPKR_POSITIVE_VOLTAGE));
+		AddDelayEntry(newindex, NeutralOr(Amplitude::positive));
 		break;
 	case 3:
 		spkr.mode = SPKR_PIT_ON;
-		AddDelayEntry(newindex, NeutralLastPitOr(SPKR_POSITIVE_VOLTAGE));
+		AddDelayEntry(newindex, NeutralLastPitOr(Amplitude::positive));
 		break;
 	};
 
@@ -337,7 +389,7 @@ static void PCSPEAKER_CallBack(Bitu len)
 				index+=vol_len;
 			} else {
 				/* Check how long it will take to goto new level */
-				constexpr float spkr_speed = SPKR_POSITIVE_VOLTAGE *
+				constexpr float spkr_speed = Amplitude::positive *
 				                             2.0f /
 				                             0.070f; // TODO:
 				                                     // define
@@ -367,6 +419,7 @@ static void PCSPEAKER_CallBack(Bitu len)
 				}
 			}
 		}
+		spkr.prev_pos = pos;
 		*stream++=(Bit16s)(value/sample_add);
 	}
 	PlayOrSilence(pos, len, reinterpret_cast<int16_t *>(MixTemp));
@@ -388,7 +441,7 @@ public:
 		spkr.min_tr = (PIT_TICK_RATE + spkr.rate / 2 - 1) / (spkr.rate / 2);
 		/* Register the sound channel */
 		spkr.chan = MixerChan.Install(&PCSPEAKER_CallBack, spkr.rate, "SPKR");
-		spkr.chan->SetPeakAmplitude(static_cast<uint32_t>(SPKR_POSITIVE_VOLTAGE));
+		spkr.chan->SetPeakAmplitude(static_cast<uint32_t>(Amplitude::positive));
 	}
 	~PCSPEAKER(){
 		Section_prop * section=static_cast<Section_prop *>(m_configuration);
