@@ -705,8 +705,20 @@ void DOSBOX_Init(void) {
 	Pbool = secprop->Add_bool("pcspeaker",Property::Changeable::WhenIdle,true);
 	Pbool->Set_help("Enable PC-Speaker emulation.");
 
-	Pint = secprop->Add_int("pcrate",Property::Changeable::WhenIdle,44100);
-	Pint->Set_values(rates);
+	// Basis for the default PC-Speaker sample generation rate:
+	//   "With the PC speaker, typically a 6-bit DAC with a maximum value of
+	//   63
+	//    is used at a sample rate of 18,939.4 Hz."
+	// PC Speaker. (2020, June 8). In Wikipedia. Retrieved from
+	// https://en.wikipedia.org/w/index.php?title=PC_speaker&oldid=961464485
+	//
+	// As this is the frequency range that game authors in the 1980s would
+	// have worked with when tuning their game audio, we therefore use this
+	// same value given it's the most likely to produce audio as intended by
+	// the authors.
+	Pint = secprop->Add_int("pcrate", when_idle, 18939);
+
+	Pint->SetMinMax(8000, 48000);
 	Pint->Set_help("Sample rate of the PC-Speaker sound generation.");
 
 	secprop->AddInitFunction(&TANDYSOUND_Init,true);//done
