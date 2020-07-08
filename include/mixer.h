@@ -24,10 +24,17 @@
 #include "dosbox.h"
 #endif
 
+#include <functional>
+
 #include "envelope.h"
 
 typedef void (*MIXER_MixHandler)(Bit8u *sampdate, Bit32u len);
-typedef void (*MIXER_Handler)(Bitu len);
+
+// The mixer callback can accept a static function or a member function
+// using a std::bind. The callback typically requests enough frames to fill
+// one millisecond. For an audio channel running at 48,000 Hz, that's 48
+// frames.
+typedef std::function<void(uint16_t frames)> MIXER_Handler;
 
 enum BlahModes {
 	MIXER_8MONO,MIXER_8STEREO,
