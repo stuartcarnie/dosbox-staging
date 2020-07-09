@@ -267,7 +267,7 @@ public:
 		                       (double)GUS_RATE;
 		IncrVolIndex = static_cast<uint32_t>(realadd);
 	}
-	INLINE void WaveUpdate()
+	inline void WaveUpdate()
 	{
 		if (WaveCtrl & (WCTRL_STOP | WCTRL_STOPPED))
 			return;
@@ -411,7 +411,7 @@ static void GUSReset()
 	}
 }
 
-static INLINE void GUS_CheckIRQ()
+static inline void GUS_CheckIRQ()
 {
 	if (myGUS.IRQStatus && (myGUS.mixControl & 0x08))
 		PIC_ActivateIRQ(myGUS.irq1);
@@ -423,7 +423,8 @@ static void CheckVoiceIrq()
 	const Bitu totalmask = (myGUS.RampIRQ | myGUS.WaveIRQ) & myGUS.ActiveMask;
 	if (!totalmask)
 		return;
-	if (myGUS.RampIRQ) myGUS.IRQStatus|=0x40;
+	if (myGUS.RampIRQ)
+		myGUS.IRQStatus |= 0x40;
 	if (myGUS.WaveIRQ) myGUS.IRQStatus|=0x20;
 	GUS_CheckIRQ();
 	for (;;) {
@@ -516,7 +517,7 @@ static void ExecuteGlobRegister()
 	//	if (myGUS.gRegSelect|1!=0x44) LOG_MSG("write global register %x
 	// with %x", myGUS.gRegSelect, myGUS.gRegData);
 	switch (myGUS.gRegSelect) {
-	case 0x0:  // Channel voice control register
+	case 0x0: // Channel voice control register
 		if (curchan)
 			curchan->WriteWaveCtrl(
 			        static_cast<uint16_t>(myGUS.gRegData) >> 8);
