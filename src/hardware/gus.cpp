@@ -98,6 +98,7 @@ struct GFGus {
 	} timers[2];
 
 	uint32_t rate = 0u;
+	Frame peak_amplitude = {1.0f, 1.0f};
 	Bitu portbase = 0u;
 	uint8_t dma1 = 0u;
 	uint8_t dma2 = 0u;
@@ -335,19 +336,18 @@ public:
 		}
 	}
 
-	void generateSamples(int32_t *stream, uint32_t len)
+	void generateSamples(float *stream, Frame &peak, uint16_t len)
 	{
 		if (RampCtrl & WaveCtrl & 3) // Channel is disabled
 			return;
 
-		uint16_t tally = 0;
-		while (tally++ < len) {
+		while (len-- > 0) {
 			const float sample = (this->*getSample)() *
 			                     vol_scalars[CurrentVolIndex];
-			*(stream++) += static_cast<int32_t>(
-			        sample * pan_scalars[PanPot].left);
-			*(stream++) += static_cast<int32_t>(
-			        sample * pan_scalars[PanPot].right);
+			*(stream++) += sample * pan_scalars[PanPot].left;
+			*(stream++) += sample * pan_scalars[PanPot].right;
+			peak.left = std::max(peak.left, fabs(stream[-2]));
+			peak.right = std::max(peak.right, fabs(stream[-1]));
 			WaveUpdate();
 			RampUpdate();
 		}
@@ -400,6 +400,7 @@ static void GUSReset()
 			channel->WritePanPot(0x7);
 		}
 		myGUS.IRQChan = 0;
+		myGUS.peak_amplitude = {1.0f, 1.0f};
 	}
 	if ((myGUS.gRegData & 0x4) != 0) {
 		myGUS.irqenabled = true;
@@ -867,13 +868,18 @@ static void GUS_DMA_Callback(DmaChannel *chan, DMAEvent event)
 
 static void GUS_CallBack(uint16_t len)
 {
-	Bit32s buffer[MIXER_BUFSIZE][2];
-	memset(buffer, 0, len * sizeof(buffer[0]));
+	assert(len <= GUS_BUFFER_FRAMES);
 
-	for (Bitu i = 0; i < myGUS.ActiveChannels; i++) {
-		guschan[i]->generateSamples(buffer[0], len);
-	}
-	gus_chan->AddSamples_s32(len, buffer[0]);
+	float accumulator[GUS_BUFFER_FRAMES][2] = {{0}};
+	for (uint8_t i = 0; i < myGUS.ActiveChannels; ++i)
+		guschan[i]->generateSamples(*accumulator, myGUS.peak_amplitude, len);
+
+	int16_t bounded[GUS_BUFFER_FRAMES][2];
+	for (uint8_t i = 0; i < len; ++i)
+		for (uint8_t j = 0; j < 2; ++j)
+			bounded[i][j] = static_cast<int16_t>(accumulator[i][j]);
+
+	gus_chan->AddSamples_s16(len, bounded[0]);
 	CheckVoiceIrq();
 }
 
