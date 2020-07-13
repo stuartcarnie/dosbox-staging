@@ -162,9 +162,11 @@ public:
 
 	void WriteWaveCtrl(uint8_t val);
 
-	typedef std::function<float(const uint32_t)> get_sample_f;
+	typedef std::function<float(const uint8_t *const, const uint32_t)> get_sample_f;
 	get_sample_f GetSample = std::bind(&GUSChannels::GetSample8,
-	                                   this, std::placeholders::_1);
+	                                   this,
+	                                   std::placeholders::_1,
+	                                   std::placeholders::_2);
 
 	Gus::VoiceIrqs &voice_irqs;
 	uint32_t WaveStart = 0u;
@@ -197,21 +199,20 @@ public:
 	}
 
 	// Read an 8-bit sample scaled into the 16-bit range, returned as a float
-	inline float GetSample8(const uint32_t addr) const
+	inline float GetSample8(const uint8_t *const ram, const uint32_t addr) const
 	{
 		constexpr float to_16bit_range =
 		        1u << (std::numeric_limits<int16_t>::digits -
 		               std::numeric_limits<int8_t>::digits);
-		return static_cast<int8_t>(myGUS->ram[addr & 0xFFFFFu]) *
-		       to_16bit_range;
+		return static_cast<int8_t>(ram[addr & 0xFFFFFu]) * to_16bit_range;
 	}
 
 	// Read a 16-bit sample returned as a float
-	inline float GetSample16(const uint32_t addr) const
+	inline float GetSample16(const uint8_t *const ram, const uint32_t addr) const
 	{
 		// Calculate offset of the 16-bit sample
 		const uint32_t adjaddr = (addr & 0xC0000u) | ((addr & 0x1FFFFu) << 1u);
-		return static_cast<int16_t>(host_readw(myGUS->ram + adjaddr));
+		return static_cast<int16_t>(host_readw(ram + adjaddr));
 	}
 
 	void WriteWaveFreq(uint16_t val)
@@ -339,34 +340,38 @@ public:
 		}
 	}
 
-	void generateSamples(float *stream, Frame &peak, uint16_t len)
+	void generateSamples(float *stream,
+	                     const uint8_t *const ram,
+	                     const std::array<float, GUS_VOLUME_POSITIONS> &vol_scalars,
+	                     const std::array<Frame, GUS_PAN_POSITIONS> &pan_scalars,
+	                     Frame &peak,
+	                     uint16_t len)
 	{
 		if (RampCtrl & WaveCtrl & 3) // Channel is disabled
 			return;
 
 		while (len-- > 0) {
-			// Calculate the memory address of the sample
-			const uint32_t useAddr = WaveAddr >> WAVE_FRACT;
-
 			// Get the sample
-			float sample = GetSample(useAddr);
+			const uint32_t sample_addr = WaveAddr >> WAVE_FRACT;
+			float sample = GetSample(ram, sample_addr);
 
 			// Add any fractional inter-wave portion
 			constexpr uint32_t wave_width = 1 << WAVE_FRACT;
 			if (WaveAdd < wave_width) {
-				const float next_sample = GetSample(useAddr + 1u);
+				const float next_sample = GetSample(ram, sample_addr + 1u);
 				const uint32_t wave_fraction = WaveAddr & (wave_width - 1u);
 				sample += (next_sample - sample) * wave_fraction / wave_width;
+
 				// Confirm the sample plus inter-wave portion is in-bounds
 				assert(sample <= std::numeric_limits<int16_t>::max() &&
 				       sample >= std::numeric_limits<int16_t>::min());
 			}
 			// Apply any selected volume reduction
-			sample *= myGUS->vol_scalars[CurrentVolIndex];
+			sample *= vol_scalars[CurrentVolIndex];
 
 			// Add the sample to the stream, angled in L-R space
-			*(stream++) += sample * myGUS->pan_scalars[PanPot].left;
-			*(stream++) += sample * myGUS->pan_scalars[PanPot].right;
+			*(stream++) += sample * pan_scalars[PanPot].left;
+			*(stream++) += sample * pan_scalars[PanPot].right;
 
 			// Keep tabs on the accumulated stream amplitudes
 			peak.left = std::max(peak.left, fabsf(stream[-2]));
@@ -393,11 +398,11 @@ void GUSChannels::WriteWaveCtrl(uint8_t val)
 	WaveCtrl = val & 0x7f;
 	if (WaveCtrl & WCTRL_16BIT) {
 		GetSample = std::bind(&GUSChannels::GetSample16, this,
-		                      std::placeholders::_1);
+		                      std::placeholders::_1, std::placeholders::_2);
 		generated_ms = &generated_16bit_ms;
 	} else {
 		GetSample = std::bind(&GUSChannels::GetSample8, this,
-		                      std::placeholders::_1);
+		                      std::placeholders::_1, std::placeholders::_2);
 		generated_ms = &generated_8bit_ms;
 	}
 
@@ -1039,7 +1044,8 @@ void Gus::GUS_CallBack(uint16_t len)
 
 	float accumulator[GUS_BUFFER_FRAMES][2] = {{0}};
 	for (uint8_t i = 0; i < ActiveChannels; ++i)
-		guschan[i]->generateSamples(*accumulator, peak_amplitude, len);
+		guschan[i]->generateSamples(*accumulator, ram, vol_scalars,
+		                            pan_scalars, peak_amplitude, len);
 
 	int16_t scaled[GUS_BUFFER_FRAMES][2];
 	if (!SoftLimit(accumulator, scaled, len))
