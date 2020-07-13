@@ -134,9 +134,9 @@ IO_ReadHandleObject::~IO_ReadHandleObject(){
 
 void IO_WriteHandleObject::Install(Bitu port, IO_WriteHandler handler, Bitu mask, Bitu range)
 {
-	if(!installed) {
-		installed=true;
-		m_port=port;
+	if (!installed) {
+		installed = true;
+		m_port = port;
 		m_mask=mask;
 		m_range=range;
 		IO_RegisterWriteHandler(port,handler,mask,range);

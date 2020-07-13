@@ -49,9 +49,9 @@
 #define GUS_PAN_POSITIONS    16u // 0 face-left, 7 face-forward, and 15 face-right
 #define GUS_VOLUME_POSITIONS 4096u
 #define GUS_VOLUME_SCALE_DIV 1.002709201 // 0.0235 dB increments
-#define GUS_RAM_SIZE         1048576u // 1 MB
-#define GUS_BASE             myGUS->portbase
+#define GUS_RAM_SIZE         1048576u    // 1 MB
 #define GUS_READ_HANDLERS    8u
+#define GUS_WRITE_HANDLERS   9u
 #define LOG_GUS              0
 
 #define WCTRL_STOPPED       0x01
@@ -88,8 +88,9 @@ public:
 		uint32_t wave = 0u;
 	};
 
-	Gus();
+	Gus(size_t base, uint32_t d1, uint32_t d2, uint32_t i1, uint32_t i2);
 	~Gus();
+	Gus() = delete;
 	Gus(const Gus &) = delete;            // prevent copying
 	Gus &operator=(const Gus &) = delete; // prevent assignment
 
@@ -104,13 +105,15 @@ public:
 	void PrintStats();
 	void GUSReset();
 	bool CheckTimer(size_t t);
-	Bitu ReadPort(const Bitu port, const Bitu iolen);
+	Bitu ReadFromPort(const Bitu port, const Bitu iolen);
+	void WriteToPort(Bitu port, Bitu val, Bitu iolen);
 
 	Timer timers[2] = {};
 	std::array<Frame, GUS_PAN_POSITIONS> pan_scalars = {};
 	std::array<float, GUS_VOLUME_POSITIONS> vol_scalars = {{0.0f}};
 	std::array<GUSChannels *, GUS_MAX_CHANNELS> guschan = {{nullptr}};
 	std::array<IO_ReadHandleObject, GUS_READ_HANDLERS> read_handlers = {};
+	std::array<IO_WriteHandleObject, GUS_WRITE_HANDLERS> write_handlers = {};
 
 	VoiceIrqs voice_irqs = {std::bind(&Gus::CheckVoiceIrq, this), 0u, 0u};
 	Frame peak_amplitude = {1.0f, 1.0f};
@@ -419,7 +422,12 @@ void GUSChannels::WriteWaveCtrl(uint8_t val)
 		voice_irqs.check();
 }
 
-Gus::Gus()
+Gus::Gus(size_t base, uint32_t d1, uint32_t d2, uint32_t i1, uint32_t i2)
+        : portbase(base),
+          dma1(d1),
+          dma2(d2),
+          irq1(i1),
+          irq2(i2)
 {
 	// Create the internal voice channels
 	for (uint8_t chan_ct = 0; chan_ct < GUS_MAX_CHANNELS; chan_ct++) {
@@ -427,16 +435,36 @@ Gus::Gus()
 	}
 
 	// Register the IO read addresses
-	const auto read_port = std::bind(&Gus::ReadPort, this, std::placeholders::_1,
+	const auto read_from = std::bind(&Gus::ReadFromPort, this,
+	                                 std::placeholders::_1,
 	                                 std::placeholders::_2);
-	read_handlers[0].Install(0x302 + GUS_BASE, read_port, IO_MB);
-	read_handlers[1].Install(0x303 + GUS_BASE, read_port, IO_MB);
-	read_handlers[2].Install(0x304 + GUS_BASE, read_port, IO_MB | IO_MW);
-	read_handlers[3].Install(0x305 + GUS_BASE, read_port, IO_MB);
-	read_handlers[4].Install(0x206 + GUS_BASE, read_port, IO_MB);
-	read_handlers[5].Install(0x208 + GUS_BASE, read_port, IO_MB);
-	read_handlers[6].Install(0x307 + GUS_BASE, read_port, IO_MB);
-	read_handlers[7].Install(0x20A + GUS_BASE, read_port, IO_MB);
+	read_handlers[0].Install(0x302 + portbase, read_from, IO_MB);
+	read_handlers[1].Install(0x303 + portbase, read_from, IO_MB);
+	read_handlers[2].Install(0x304 + portbase, read_from, IO_MB | IO_MW);
+	read_handlers[3].Install(0x305 + portbase, read_from, IO_MB);
+	read_handlers[4].Install(0x206 + portbase, read_from, IO_MB);
+	read_handlers[5].Install(0x208 + portbase, read_from, IO_MB);
+	read_handlers[6].Install(0x307 + portbase, read_from, IO_MB);
+	// Board Only
+	read_handlers[7].Install(0x20A + portbase, read_from, IO_MB);
+
+	// Register the IO write addresses
+	// We'll leave the MIDI interface to the MPU-401
+	// Ditto for the Joystick
+	// GF1 Synthesizer
+	const auto write_to = std::bind(&Gus::WriteToPort, this,
+	                                std::placeholders::_1, std::placeholders::_2,
+	                                std::placeholders::_3);
+	write_handlers[0].Install(0x302 + portbase, write_to, IO_MB);
+	write_handlers[1].Install(0x303 + portbase, write_to, IO_MB);
+	write_handlers[2].Install(0x304 + portbase, write_to, IO_MB | IO_MW);
+	write_handlers[3].Install(0x305 + portbase, write_to, IO_MB);
+	write_handlers[4].Install(0x208 + portbase, write_to, IO_MB);
+	write_handlers[5].Install(0x209 + portbase, write_to, IO_MB);
+	write_handlers[6].Install(0x307 + portbase, write_to, IO_MB);
+	// Board Only
+	write_handlers[7].Install(0x200 + portbase, write_to, IO_MB);
+	write_handlers[8].Install(0x20B + portbase, write_to, IO_MB);
 
 	// Register the Mixer CallBack
 	gus_chan = MixerChan.Install(std::bind(&Gus::GUS_CallBack, this,
@@ -847,10 +875,10 @@ void Gus::ExecuteGlobRegister()
 	}
 	return;
 }
-Bitu Gus::ReadPort(const Bitu port, const Bitu iolen)
+Bitu Gus::ReadFromPort(const Bitu port, const Bitu iolen)
 {
 	//	LOG_MSG("read from gus port %x",port);
-	switch (port - GUS_BASE) {
+	switch (port - portbase) {
 	case 0x206: return IRQStatus;
 	case 0x208:
 		uint8_t tmptime;
@@ -891,87 +919,84 @@ Bitu Gus::ReadPort(const Bitu port, const Bitu iolen)
 	return 0xff;
 }
 
-static void write_gus(Bitu port, Bitu val, Bitu iolen)
+void Gus::WriteToPort(Bitu port, Bitu val, Bitu iolen)
 {
 	//	LOG_MSG("Write gus port %x val %x",port,val);
-	switch (port - GUS_BASE) {
+	switch (port - portbase) {
 	case 0x200:
-		myGUS->mixControl = static_cast<uint8_t>(val);
-		myGUS->ChangeIRQDMA = true;
+		mixControl = static_cast<uint8_t>(val);
+		ChangeIRQDMA = true;
 		return;
-	case 0x208: myGUS->adlib_command_reg = static_cast<uint8_t>(val); break;
+	case 0x208: adlib_command_reg = static_cast<uint8_t>(val); break;
 	case 0x209:
-		// TODO myGUS->adlib_command_reg should be 4 for this to work
+		// TODO adlib_command_reg should be 4 for this to work
 		// else it should just latch the value
 		if (val & 0x80) {
-			myGUS->timers[0].reached = false;
-			myGUS->timers[1].reached = false;
+			timers[0].reached = false;
+			timers[1].reached = false;
 			return;
 		}
-		myGUS->timers[0].masked = (val & 0x40) > 0;
-		myGUS->timers[1].masked = (val & 0x20) > 0;
+		timers[0].masked = (val & 0x40) > 0;
+		timers[1].masked = (val & 0x20) > 0;
 		if (val & 0x1) {
-			if (!myGUS->timers[0].running) {
-				PIC_AddEvent(GUS_TimerEvent,
-				             myGUS->timers[0].delay, 0);
-				myGUS->timers[0].running = true;
+			if (!timers[0].running) {
+				PIC_AddEvent(GUS_TimerEvent, timers[0].delay, 0);
+				timers[0].running = true;
 			}
 		} else
-			myGUS->timers[0].running = false;
+			timers[0].running = false;
 		if (val & 0x2) {
-			if (!myGUS->timers[1].running) {
-				PIC_AddEvent(GUS_TimerEvent,
-				             myGUS->timers[1].delay, 1);
-				myGUS->timers[1].running = true;
+			if (!timers[1].running) {
+				PIC_AddEvent(GUS_TimerEvent, timers[1].delay, 1);
+				timers[1].running = true;
 			}
 		} else
-			myGUS->timers[1].running = false;
+			timers[1].running = false;
 		break;
 		// TODO Check if 0x20a register is also available on the gus
 		// like on the interwave
 	case 0x20b:
-		if (!myGUS->ChangeIRQDMA)
+		if (!ChangeIRQDMA)
 			break;
-		myGUS->ChangeIRQDMA = false;
-		if (myGUS->mixControl & 0x40) {
+		ChangeIRQDMA = false;
+		if (mixControl & 0x40) {
 			// IRQ configuration, only use low bits for irq 1
-			if (myGUS->irq_addresses[val & 0x7])
-				myGUS->irq1 = myGUS->irq_addresses[val & 0x7];
+			if (irq_addresses[val & 0x7])
+				irq1 = irq_addresses[val & 0x7];
 #if LOG_GUS
-			LOG_MSG("Assigned GUS to IRQ %d", myGUS->irq1);
+			LOG_MSG("Assigned GUS to IRQ %d", irq1);
 #endif
 		} else {
 			// DMA configuration, only use low bits for dma 1
-			if (myGUS->dma_addresses[val & 0x7])
-				myGUS->dma1 = myGUS->dma_addresses[val & 0x7];
+			if (dma_addresses[val & 0x7])
+				dma1 = dma_addresses[val & 0x7];
 #if LOG_GUS
-			LOG_MSG("Assigned GUS to DMA %d", myGUS->dma1);
+			LOG_MSG("Assigned GUS to DMA %d", dma1);
 #endif
 		}
 		break;
 	case 0x302:
-		myGUS->gCurChannel = val & 31;
-		myGUS->curchan = myGUS->guschan[myGUS->gCurChannel];
+		gCurChannel = val & 31;
+		curchan = guschan[gCurChannel];
 		break;
 	case 0x303:
-		myGUS->gRegSelect = static_cast<uint8_t>(val);
-		myGUS->gRegData = 0;
+		gRegSelect = static_cast<uint8_t>(val);
+		gRegData = 0;
 		break;
 	case 0x304:
 		if (iolen == 2) {
-			myGUS->gRegData = static_cast<uint16_t>(val);
-			myGUS->ExecuteGlobRegister();
+			gRegData = static_cast<uint16_t>(val);
+			ExecuteGlobRegister();
 		} else
-			myGUS->gRegData = static_cast<uint16_t>(val);
+			gRegData = static_cast<uint16_t>(val);
 		break;
 	case 0x305:
-		myGUS->gRegData = static_cast<uint16_t>(
-		        (0x00ff & myGUS->gRegData) | val << 8);
-		myGUS->ExecuteGlobRegister();
+		gRegData = static_cast<uint16_t>((0x00ff & gRegData) | val << 8);
+		ExecuteGlobRegister();
 		break;
 	case 0x307:
-		if (myGUS->gDramAddr < GUS_RAM_SIZE)
-			myGUS->ram[myGUS->gDramAddr] = static_cast<uint8_t>(val);
+		if (gDramAddr < GUS_RAM_SIZE)
+			ram[gDramAddr] = static_cast<uint8_t>(val);
 		break;
 	default:
 #if LOG_GUS
@@ -1148,54 +1173,25 @@ void Gus::PopulatePanScalars()
 
 class GUS : public Module_base {
 private:
-	IO_WriteHandleObject WriteHandler[9];
 	AutoexecObject autoexecline[2];
 
 public:
 	GUS(Section *configuration) : Module_base(configuration)
 	{
-		myGUS = new Gus();
-
 		if (!IS_EGAVGA_ARCH)
 			return;
 		Section_prop *section = static_cast<Section_prop *>(configuration);
 		if (!section->Get_bool("gus"))
 			return;
-		myGUS->portbase = section->Get_hex("gusbase") - 0x200;
+		const size_t portbase = section->Get_hex("gusbase") - 0x200;
 		int dma_val = section->Get_int("gusdma");
 		if ((dma_val < 0) || (dma_val > 255))
 			dma_val = 3; // sensible default
 		int irq_val = section->Get_int("gusirq");
 		if ((irq_val < 0) || (irq_val > 255))
 			irq_val = 5; // sensible default
-		myGUS->dma1 = static_cast<uint8_t>(dma_val);
-		myGUS->dma2 = static_cast<uint8_t>(dma_val);
-		myGUS->irq1 = static_cast<uint8_t>(irq_val);
-		myGUS->irq2 = static_cast<uint8_t>(irq_val);
 
-		// We'll leave the MIDI interface to the MPU-401
-		// Ditto for the Joystick
-		// GF1 Synthesizer
-		WriteHandler[0].Install(0x302 + GUS_BASE, write_gus, IO_MB);
-
-		WriteHandler[1].Install(0x303 + GUS_BASE, write_gus, IO_MB);
-
-		WriteHandler[2].Install(0x304 + GUS_BASE, write_gus, IO_MB | IO_MW);
-
-		WriteHandler[3].Install(0x305 + GUS_BASE, write_gus, IO_MB);
-
-		WriteHandler[4].Install(0x208 + GUS_BASE, write_gus, IO_MB);
-
-		WriteHandler[5].Install(0x209 + GUS_BASE, write_gus, IO_MB);
-
-		WriteHandler[6].Install(0x307 + GUS_BASE, write_gus, IO_MB);
-
-		// Board Only
-
-		WriteHandler[7].Install(0x200 + GUS_BASE, write_gus, IO_MB);
-		WriteHandler[8].Install(0x20B + GUS_BASE, write_gus, IO_MB);
-
-		//	DmaChannels[myGUS->dma1]->Register_TC_Callback(GUS_DMA_TC_Callback);
+		myGUS = new Gus(portbase, dma_val, dma_val, irq_val, irq_val);
 
 		myGUS->PopulateVolScalars();
 		myGUS->PopulatePanScalars();
@@ -1203,7 +1199,7 @@ public:
 		myGUS->gRegData = 0x1;
 		myGUS->GUSReset();
 		myGUS->gRegData = 0x0;
-		const Bitu portat = 0x200 + GUS_BASE;
+		const Bitu portat = 0x200 + myGUS->portbase;
 
 		// ULTRASND=Port,DMA1,DMA2,IRQ1,IRQ2
 		// [GUS port], [GUS DMA (recording)], [GUS DMA (playback)], [GUS
