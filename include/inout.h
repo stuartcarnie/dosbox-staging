@@ -29,15 +29,17 @@
 #define IO_MD	0x4
 #define IO_MA	(IO_MB | IO_MW | IO_MD )
 
-// typedef Bitu IO_ReadHandler(Bitu port,Bitu iolen);
 typedef std::function<Bitu(Bitu port, Bitu iolen)> IO_ReadHandler;
-typedef void IO_WriteHandler(Bitu port, Bitu val, Bitu iolen);
+typedef std::function<void(Bitu port, Bitu val, Bitu iolen)> IO_WriteHandler;
 
-extern IO_WriteHandler * io_writehandlers[3][IO_MAX];
+extern IO_WriteHandler io_writehandlers[3][IO_MAX];
 extern IO_ReadHandler io_readhandlers[3][IO_MAX];
 
 void IO_RegisterReadHandler(Bitu port, IO_ReadHandler handler, Bitu mask, Bitu range = 1);
-void IO_RegisterWriteHandler(Bitu port,IO_WriteHandler * handler,Bitu mask,Bitu range=1);
+void IO_RegisterWriteHandler(Bitu port,
+                             IO_WriteHandler handler,
+                             Bitu mask,
+                             Bitu range = 1);
 
 void IO_FreeReadHandler(Bitu port,Bitu mask,Bitu range=1);
 void IO_FreeWriteHandler(Bitu port,Bitu mask,Bitu range=1);
@@ -72,7 +74,7 @@ public:
 };
 class IO_WriteHandleObject: private IO_Base{
 public:
-	void Install(Bitu port,IO_WriteHandler * handler,Bitu mask,Bitu range=1);
+	void Install(Bitu port, IO_WriteHandler handler, Bitu mask, Bitu range = 1);
 	void Uninstall();
 	~IO_WriteHandleObject();
 };
