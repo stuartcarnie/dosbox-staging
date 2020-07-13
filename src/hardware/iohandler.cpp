@@ -28,7 +28,7 @@
 //#define ENABLE_PORTLOG
 
 IO_WriteHandler * io_writehandlers[3][IO_MAX];
-IO_ReadHandler * io_readhandlers[3][IO_MAX];
+IO_ReadHandler io_readhandlers[3][IO_MAX];
 
 static Bitu IO_ReadBlocked(Bitu /*port*/,Bitu /*iolen*/) {
 	return ~0;
@@ -72,7 +72,8 @@ void IO_WriteDefault(Bitu port,Bitu val,Bitu iolen) {
 	}
 }
 
-void IO_RegisterReadHandler(Bitu port,IO_ReadHandler * handler,Bitu mask,Bitu range) {
+void IO_RegisterReadHandler(Bitu port, IO_ReadHandler handler, Bitu mask, Bitu range)
+{
 	while (range--) {
 		if (mask&IO_MB) io_readhandlers[0][port]=handler;
 		if (mask&IO_MW) io_readhandlers[1][port]=handler;
@@ -108,7 +109,8 @@ void IO_FreeWriteHandler(Bitu port,Bitu mask,Bitu range) {
 	}
 }
 
-void IO_ReadHandleObject::Install(Bitu port,IO_ReadHandler * handler,Bitu mask,Bitu range) {
+void IO_ReadHandleObject::Install(Bitu port, IO_ReadHandler handler, Bitu mask, Bitu range)
+{
 	if(!installed) {
 		installed=true;
 		m_port=port;
