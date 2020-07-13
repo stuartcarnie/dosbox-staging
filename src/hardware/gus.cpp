@@ -102,6 +102,7 @@ public:
 	uint16_t ExecuteReadRegister();
 	void PrintStats();
 	void GUSReset();
+	bool CheckTimer(size_t t);
 
 	Timer timers[2] = {};
 	std::array<Frame, GUS_PAN_POSITIONS> pan_scalars = {};
@@ -647,16 +648,21 @@ uint16_t Gus::ExecuteReadRegister()
 	}
 }
 
-static void GUS_TimerEvent(Bitu val)
+bool Gus::CheckTimer(const size_t t)
 {
-	if (!myGUS->timers[val].masked)
-		myGUS->timers[val].reached = true;
-	if (myGUS->timers[val].raiseirq) {
-		myGUS->IRQStatus |= 0x4 << val;
-		myGUS->GUS_CheckIRQ();
+	if (!timers[t].masked)
+		timers[t].reached = true;
+	if (timers[t].raiseirq) {
+		IRQStatus |= 0x4 << t;
+		GUS_CheckIRQ();
 	}
-	if (myGUS->timers[val].running)
-		PIC_AddEvent(GUS_TimerEvent, myGUS->timers[val].delay, val);
+	return timers[t].running;
+}
+
+static void GUS_TimerEvent(Bitu t)
+{
+	if (myGUS->CheckTimer(t))
+		PIC_AddEvent(GUS_TimerEvent, myGUS->timers[t].delay, t);
 }
 
 void Gus::ExecuteGlobRegister()
