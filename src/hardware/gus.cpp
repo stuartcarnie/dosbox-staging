@@ -63,7 +63,6 @@
 #define WCTRL_IRQPENDING    0x80
 
 class GUSChannels;
-static void CheckVoiceIrq();
 
 uint8_t adlib_commandreg = 0u;
 struct Frame {
@@ -82,11 +81,22 @@ class Gus {
 	};
 
 public:
+	struct VoiceIrqs {
+		const std::function<void()> check = nullptr;
+		uint32_t ramp = 0u;
+		uint32_t wave = 0u;
+	};
+
 	Gus();
 	~Gus();
 	Gus(const Gus &) = delete;            // prevent copying
 	Gus &operator=(const Gus &) = delete; // prevent assignment
 
+	void GUS_CheckIRQ();
+	void CheckVoiceIrq();
+	bool SoftLimit(float (&)[64][2], int16_t (&)[64][2], uint16_t);
+	void PopulateVolScalars();
+	void PopulatePanScalars();
 	void GUS_CallBack(uint16_t len);
 	void ExecuteGlobRegister();
 	uint16_t ExecuteReadRegister();
@@ -95,8 +105,9 @@ public:
 
 	Timer timers[2] = {};
 	std::array<Frame, GUS_PAN_POSITIONS> pan_scalars = {};
-	std::array<float, GUS_VOLUME_POSITIONS> vol_scalars = {0.0f};
-	std::array<GUSChannels *, GUS_MAX_CHANNELS> guschan = {nullptr};
+	std::array<float, GUS_VOLUME_POSITIONS> vol_scalars = {{0.0f}};
+	std::array<GUSChannels *, GUS_MAX_CHANNELS> guschan = {{nullptr}};
+	VoiceIrqs voice_irqs = {std::bind(&Gus::CheckVoiceIrq, this), 0u, 0u};
 	Frame peak_amplitude = {1.0f, 1.0f};
 	MixerObject MixerChan = {};
 
@@ -108,8 +119,6 @@ public:
 	uint32_t rate = 0u;
 	uint32_t gDramAddr = 0u;
 	uint32_t ActiveMask = 0u;
-	uint32_t RampIRQ = 0u;
-	uint32_t WaveIRQ = 0u;
 
 	uint16_t gRegData = 0u;
 	uint16_t gCurChannel = 0u;
@@ -146,6 +155,11 @@ static void GUS_DMA_Callback(DmaChannel *chan, DMAEvent event);
 
 class GUSChannels {
 public:
+	GUSChannels(uint8_t num, Gus::VoiceIrqs &irqs);
+	GUSChannels() = delete;
+	GUSChannels(const GUSChannels &) = delete;            // prevent copying
+	GUSChannels &operator=(const GUSChannels &) = delete; // prevent assignment
+
 	void WriteWaveCtrl(uint8_t val);
 
 	typedef std::function<float(const uint32_t)> get_sample_f;
@@ -175,8 +189,6 @@ public:
 	uint32_t generated_8bit_ms = 0u;
 	uint32_t generated_16bit_ms = 0u;
 	uint32_t *generated_ms = &generated_8bit_ms;
-
-	GUSChannels(uint8_t num) : channum(num), irqmask(1 << num) {}
 
 	void ClearStats()
 	{
@@ -211,7 +223,7 @@ public:
 	inline uint8_t ReadWaveCtrl() const
 	{
 		uint8_t ret = WaveCtrl;
-		if (myGUS->WaveIRQ & irqmask)
+		if (voice_irqs.wave & irqmask)
 			ret |= 0x80;
 		return ret;
 	}
@@ -230,20 +242,20 @@ public:
 	uint8_t ReadPanPot() const { return PanPot; }
 	void WriteRampCtrl(uint8_t val)
 	{
-		const uint32_t old = myGUS->RampIRQ;
+		const uint32_t old = voice_irqs.ramp;
 		RampCtrl = val & 0x7f;
 		// Manually set the irq
 		if ((val & 0xa0) == 0xa0)
-			myGUS->RampIRQ |= irqmask;
+			voice_irqs.ramp |= irqmask;
 		else
-			myGUS->RampIRQ &= ~irqmask;
-		if (old != myGUS->RampIRQ)
-			CheckVoiceIrq();
+			voice_irqs.ramp &= ~irqmask;
+		if (old != voice_irqs.ramp)
+			voice_irqs.check();
 	}
 	inline uint8_t ReadRampCtrl() const
 	{
 		uint8_t ret = RampCtrl;
-		if (myGUS->RampIRQ & irqmask)
+		if (voice_irqs.ramp & irqmask)
 			ret |= 0x80;
 		return ret;
 	}
@@ -271,7 +283,7 @@ public:
 			return;
 		/* Generate an IRQ if needed */
 		if (WaveCtrl & 0x20) {
-			myGUS->WaveIRQ |= irqmask;
+			voice_irqs.wave |= irqmask;
 		}
 		/* Check for not being in PCM operation */
 		if (RampCtrl & 0x04)
@@ -309,7 +321,7 @@ public:
 		}
 		/* Generate an IRQ if needed */
 		if (RampCtrl & 0x20) {
-			myGUS->RampIRQ |= irqmask;
+			voice_irqs.ramp |= irqmask;
 		}
 		/* Check for looping */
 		if (RampCtrl & 0x08) {
@@ -377,7 +389,7 @@ GUSChannels::GUSChannels(uint8_t num, Gus::VoiceIrqs &irqs)
 
 void GUSChannels::WriteWaveCtrl(uint8_t val)
 {
-	const uint32_t oldirq = myGUS->WaveIRQ;
+	const uint32_t oldirq = voice_irqs.wave;
 	WaveCtrl = val & 0x7f;
 	if (WaveCtrl & WCTRL_16BIT) {
 		GetSample = std::bind(&GUSChannels::GetSample16, this,
@@ -390,17 +402,17 @@ void GUSChannels::WriteWaveCtrl(uint8_t val)
 	}
 
 	if ((val & 0xa0) == 0xa0)
-		myGUS->WaveIRQ |= irqmask;
+		voice_irqs.wave |= irqmask;
 	else
-		myGUS->WaveIRQ &= ~irqmask;
-	if (oldirq != myGUS->WaveIRQ)
-		CheckVoiceIrq();
+		voice_irqs.wave &= ~irqmask;
+	if (oldirq != voice_irqs.wave)
+		voice_irqs.check();
 }
 
 Gus::Gus()
 {
 	for (uint8_t chan_ct = 0; chan_ct < GUS_MAX_CHANNELS; chan_ct++) {
-		guschan.at(chan_ct) = new GUSChannels(chan_ct);
+		guschan.at(chan_ct) = new GUSChannels(chan_ct, voice_irqs);
 	}
 
 	// Register the Mixer CallBack
@@ -526,30 +538,30 @@ void Gus::GUSReset()
 	}
 }
 
-static inline void GUS_CheckIRQ()
+inline void Gus::GUS_CheckIRQ()
 {
-	if (myGUS->IRQStatus && (myGUS->mixControl & 0x08))
-		PIC_ActivateIRQ(myGUS->irq1);
+	if (IRQStatus && (mixControl & 0x08))
+		PIC_ActivateIRQ(irq1);
 }
 
-static void CheckVoiceIrq()
+void Gus::CheckVoiceIrq()
 {
-	myGUS->IRQStatus &= 0x9f;
-	const Bitu totalmask = (myGUS->RampIRQ | myGUS->WaveIRQ) & myGUS->ActiveMask;
+	IRQStatus &= 0x9f;
+	const Bitu totalmask = (voice_irqs.ramp | voice_irqs.wave) & ActiveMask;
 	if (!totalmask)
 		return;
-	if (myGUS->RampIRQ)
-		myGUS->IRQStatus |= 0x40;
-	if (myGUS->WaveIRQ)
-		myGUS->IRQStatus |= 0x20;
+	if (voice_irqs.ramp)
+		IRQStatus |= 0x40;
+	if (voice_irqs.wave)
+		IRQStatus |= 0x20;
 	GUS_CheckIRQ();
 	for (;;) {
-		uint32_t check = (1 << myGUS->IRQChan);
+		uint32_t check = (1 << IRQChan);
 		if (totalmask & check)
 			return;
-		myGUS->IRQChan++;
-		if (myGUS->IRQChan >= myGUS->ActiveChannels)
-			myGUS->IRQChan = 0;
+		IRQChan++;
+		if (IRQChan >= ActiveChannels)
+			IRQChan = 0;
 	}
 }
 
@@ -614,13 +626,13 @@ uint16_t Gus::ExecuteReadRegister()
 		tmpreg = IRQChan | 0x20;
 		uint32_t mask;
 		mask = 1 << IRQChan;
-		if (!(RampIRQ & mask))
+		if (!(voice_irqs.ramp & mask))
 			tmpreg |= 0x40;
-		if (!(WaveIRQ & mask))
+		if (!(voice_irqs.wave & mask))
 			tmpreg |= 0x80;
-		RampIRQ &= ~mask;
-		WaveIRQ &= ~mask;
-		CheckVoiceIrq();
+		voice_irqs.ramp &= ~mask;
+		voice_irqs.wave &= ~mask;
+		voice_irqs.check();
 		return static_cast<uint16_t>(tmpreg << 8);
 	default:
 #if LOG_GUS
@@ -636,7 +648,7 @@ static void GUS_TimerEvent(Bitu val)
 		myGUS->timers[val].reached = true;
 	if (myGUS->timers[val].raiseirq) {
 		myGUS->IRQStatus |= 0x4 << val;
-		GUS_CheckIRQ();
+		myGUS->GUS_CheckIRQ();
 	}
 	if (myGUS->timers[val].running)
 		PIC_AddEvent(GUS_TimerEvent, myGUS->timers[val].delay, val);
@@ -982,27 +994,26 @@ static void GUS_DMA_Callback(DmaChannel *chan, DMAEvent event)
 	/* Raise the TC irq if needed */
 	if ((myGUS->DMAControl & 0x20) != 0) {
 		myGUS->IRQStatus |= 0x80;
-		GUS_CheckIRQ();
+		myGUS->GUS_CheckIRQ();
 	}
 	chan->Register_Callback(0);
 }
 
-static bool SoftLimit(float (&in)[GUS_BUFFER_FRAMES][2],
-                      int16_t (&out)[GUS_BUFFER_FRAMES][2],
-                      uint16_t len)
+bool Gus::SoftLimit(float (&in)[GUS_BUFFER_FRAMES][2],
+                    int16_t (&out)[GUS_BUFFER_FRAMES][2],
+                    uint16_t len)
 {
 	constexpr float max_allowed = static_cast<float>(
 	        std::numeric_limits<int16_t>::max() - 1);
 
 	// If our peaks are under the max, then there's no need to limit
-	if (myGUS->peak_amplitude.left < max_allowed &&
-	    myGUS->peak_amplitude.right < max_allowed)
+	if (peak_amplitude.left < max_allowed && peak_amplitude.right < max_allowed)
 		return false;
 
 	// Calculate the percent we need to scale down the volume.  In cases
 	// where one side is less than the max, it's ratio is limited to 1.0.
-	const Frame ratio = {std::min(1.0f, max_allowed / myGUS->peak_amplitude.left),
-	                     std::min(1.0f, max_allowed / myGUS->peak_amplitude.right)};
+	const Frame ratio = {std::min(1.0f, max_allowed / peak_amplitude.left),
+	                     std::min(1.0f, max_allowed / peak_amplitude.right)};
 	for (uint8_t i = 0; i < len; ++i) {
 		out[i][0] = static_cast<int16_t>(in[i][0] * ratio.left);
 		out[i][1] = static_cast<int16_t>(in[i][1] * ratio.right);
@@ -1012,10 +1023,10 @@ static bool SoftLimit(float (&in)[GUS_BUFFER_FRAMES][2],
 	constexpr float release_amount =
 	        max_allowed * (static_cast<float>(GUS_VOLUME_SCALE_DIV) - 1.0f);
 
-	if (myGUS->peak_amplitude.left > max_allowed)
-		myGUS->peak_amplitude.left -= release_amount;
-	if (myGUS->peak_amplitude.right > max_allowed)
-		myGUS->peak_amplitude.right -= release_amount;
+	if (peak_amplitude.left > max_allowed)
+		peak_amplitude.left -= release_amount;
+	if (peak_amplitude.right > max_allowed)
+		peak_amplitude.right -= release_amount;
 	// LOG_MSG("GUS: releasing myGUS->peak_amplitude = %.2f | %.2f",
 	//         static_cast<double>(myGUS->peak_amplitude.left),
 	//         static_cast<double>(myGUS->peak_amplitude.right));
@@ -1042,14 +1053,14 @@ void Gus::GUS_CallBack(uint16_t len)
 }
 
 // Generate logarithmic to linear volume conversion tables
-static void PopulateVolScalars()
+void Gus::PopulateVolScalars()
 {
 	double out = 1.0;
 	for (uint16_t i = GUS_VOLUME_POSITIONS - 1; i > 0; --i) {
-		myGUS->vol_scalars.at(i) = static_cast<float>(out);
+		vol_scalars.at(i) = static_cast<float>(out);
 		out /= GUS_VOLUME_SCALE_DIV;
 	}
-	myGUS->vol_scalars[0] = 0.0f;
+	vol_scalars.at(0) = 0.0f;
 }
 
 /*
@@ -1092,15 +1103,15 @@ describes that output power is held constant through this range.
 	0.09802 <~~~ 14 ( 0.875) ~~~> 0.99518 | 1.000
 	0.00000 <~~~ 15 ( 1.000) ~~~> 1.00000 | 1.000
 */
-static constexpr void PopulatePanScalars()
+void Gus::PopulatePanScalars()
 {
 	for (uint8_t pos = 0u; pos < GUS_PAN_POSITIONS; ++pos) {
 		// Normalize absolute range [0, 15] to [-1.0, 1.0]
 		const double norm = (pos - 7.0f) / (pos < 7u ? 7 : 8);
 		// Convert to an angle between 0 and 90-degree, in radians
 		const double angle = (norm + 1) * M_PI / 4;
-		myGUS->pan_scalars.at(pos).left = static_cast<float>(cos(angle));
-		myGUS->pan_scalars.at(pos).right = static_cast<float>(sin(angle));
+		pan_scalars.at(pos).left = static_cast<float>(cos(angle));
+		pan_scalars.at(pos).right = static_cast<float>(sin(angle));
 		// DEBUG_LOG_MSG("GUS: pan_scalar[%u] = %f | %f", pos,
 		// myGUS->myGUS->pan_scalars.at(pos).left,
 		// myGUS->myGUS->pan_scalars.at(pos).right);
@@ -1168,8 +1179,8 @@ public:
 
 		//	DmaChannels[myGUS->dma1]->Register_TC_Callback(GUS_DMA_TC_Callback);
 
-		PopulateVolScalars();
-		PopulatePanScalars();
+		myGUS->PopulateVolScalars();
+		myGUS->PopulatePanScalars();
 
 		myGUS->gRegData = 0x1;
 		myGUS->GUSReset();
