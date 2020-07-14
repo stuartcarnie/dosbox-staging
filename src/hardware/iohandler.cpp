@@ -137,9 +137,9 @@ void IO_WriteHandleObject::Install(Bitu port, IO_WriteHandler handler, Bitu mask
 	if (!installed) {
 		installed = true;
 		m_port = port;
-		m_mask=mask;
-		m_range=range;
-		IO_RegisterWriteHandler(port,handler,mask,range);
+		m_mask = mask;
+		m_range = range;
+		IO_RegisterWriteHandler(port, handler, mask, range);
 	} else
 		E_Exit("IO_writeHandler already installed port %#" PRIxPTR, port);
 }
