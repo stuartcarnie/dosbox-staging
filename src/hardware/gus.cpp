@@ -101,6 +101,7 @@ public:
 	void PopulateVolScalars();
 	void PopulatePanScalars();
 	void GUS_CallBack(uint16_t len);
+	void DMA_Callback(DmaChannel *chan, DMAEvent event);
 	void ExecuteGlobRegister();
 	uint16_t ExecuteReadRegister();
 	void PrintStats();
@@ -160,8 +161,6 @@ public:
 static Gus *myGUS = nullptr;
 
 Bitu DEBUG_EnableDebugger();
-
-static void GUS_DMA_Callback(DmaChannel *chan, DMAEvent event);
 
 class GUSChannels {
 public:
@@ -406,13 +405,12 @@ void GUSChannels::WriteWaveCtrl(uint8_t val)
 {
 	const uint32_t oldirq = voice_irqs.wave;
 	WaveCtrl = val & 0x7f;
+	using namespace std::placeholders;
 	if (WaveCtrl & WCTRL_16BIT) {
-		GetSample = std::bind(&GUSChannels::GetSample16, this,
-		                      std::placeholders::_1, std::placeholders::_2);
+		GetSample = std::bind(&GUSChannels::GetSample16, this, _1, _2);
 		generated_ms = &generated_16bit_ms;
 	} else {
-		GetSample = std::bind(&GUSChannels::GetSample8, this,
-		                      std::placeholders::_1, std::placeholders::_2);
+		GetSample = std::bind(&GUSChannels::GetSample8, this, _1, _2);
 		generated_ms = &generated_8bit_ms;
 	}
 
@@ -437,9 +435,8 @@ Gus::Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &ultradir)
 	}
 
 	// Register the IO read addresses
-	const auto read_from = std::bind(&Gus::ReadFromPort, this,
-	                                 std::placeholders::_1,
-	                                 std::placeholders::_2);
+	using namespace std::placeholders;
+	const auto read_from = std::bind(&Gus::ReadFromPort, this, _1, _2);
 	read_handlers[0].Install(0x302 + portbase, read_from, IO_MB);
 	read_handlers[1].Install(0x303 + portbase, read_from, IO_MB);
 	read_handlers[2].Install(0x304 + portbase, read_from, IO_MB | IO_MW);
@@ -454,9 +451,7 @@ Gus::Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &ultradir)
 	// We'll leave the MIDI interface to the MPU-401
 	// Ditto for the Joystick
 	// GF1 Synthesizer
-	const auto write_to = std::bind(&Gus::WriteToPort, this,
-	                                std::placeholders::_1, std::placeholders::_2,
-	                                std::placeholders::_3);
+	const auto write_to = std::bind(&Gus::WriteToPort, this, _1, _2, _3);
 	write_handlers[0].Install(0x302 + portbase, write_to, IO_MB);
 	write_handlers[1].Install(0x303 + portbase, write_to, IO_MB);
 	write_handlers[2].Install(0x304 + portbase, write_to, IO_MB | IO_MW);
@@ -858,8 +853,13 @@ void Gus::ExecuteGlobRegister()
 		break;
 	case 0x41: // Dma control register
 		DMAControl = static_cast<uint8_t>(gRegData >> 8);
-		GetDMAChannel(dma1)->Register_Callback(
-		        (DMAControl & 0x1) ? GUS_DMA_Callback : 0);
+		{
+			using namespace std::placeholders;
+			auto dma_callback = std::bind(&Gus::DMA_Callback, this, _1, _2);
+			std::function<void(DmaChannel *, DMAEvent)> empty_callback = nullptr;
+			GetDMAChannel(dma1)->Register_Callback(
+			        (DMAControl & 0x1) ? dma_callback : empty_callback);
+		}
 		break;
 	case 0x42: // Gravis DRAM DMA address register
 		dmaAddr = gRegData;
@@ -892,8 +892,13 @@ void Gus::ExecuteGlobRegister()
 		break;
 	case 0x49: // DMA sampling control register
 		SampControl = static_cast<uint8_t>(gRegData >> 8);
-		GetDMAChannel(dma1)->Register_Callback(
-		        (SampControl & 0x1) ? GUS_DMA_Callback : 0);
+		{
+			using namespace std::placeholders;
+			auto dma_callback = std::bind(&Gus::DMA_Callback, this, _1, _2);
+			std::function<void(DmaChannel *, DMAEvent)> empty_callback = nullptr;
+			GetDMAChannel(dma1)->Register_Callback(
+			        (SampControl & 0x1) ? dma_callback : empty_callback);
+		}
 		break;
 	case 0x4c: // GUS reset register
 		GUSReset();
@@ -1038,7 +1043,7 @@ void Gus::WriteToPort(Bitu port, Bitu val, Bitu iolen)
 	}
 }
 
-static void GUS_DMA_Callback(DmaChannel *chan, DMAEvent event)
+void Gus::DMA_Callback(DmaChannel *chan, DMAEvent event)
 {
 	if (event != DMA_UNMASKED)
 		return;
@@ -1047,38 +1052,36 @@ static void GUS_DMA_Callback(DmaChannel *chan, DMAEvent event)
 	// DMA transfers can't cross 256k boundaries, so you should be safe to
 	// just determine the start once and go from there Bit 2 - 0 = if DMA
 	// channel is an 8 bit channel(0 - 3).
-	if (myGUS->DMAControl & 0x4)
-		dmaaddr = (((myGUS->dmaAddr & 0x1fff) << 1) |
-		           (myGUS->dmaAddr & 0xc000))
-		          << 4;
+	if (DMAControl & 0x4)
+		dmaaddr = (((dmaAddr & 0x1fff) << 1) | (dmaAddr & 0xc000)) << 4;
 	else
-		dmaaddr = myGUS->dmaAddr << 4;
+		dmaaddr = dmaAddr << 4;
 	// Reading from dma?
-	if ((myGUS->DMAControl & 0x2) == 0) {
-		Bitu read = chan->Read(chan->currcnt + 1, &myGUS->ram[dmaaddr]);
+	if ((DMAControl & 0x2) == 0) {
+		Bitu read = chan->Read(chan->currcnt + 1, &ram[dmaaddr]);
 		// Check for 16 or 8bit channel
 		read *= (chan->DMA16 + 1);
-		if ((myGUS->DMAControl & 0x80) != 0) {
+		if ((DMAControl & 0x80) != 0) {
 			// Invert the MSB to convert twos compliment form
 			const size_t dma_end = dmaaddr + read;
-			if ((myGUS->DMAControl & 0x40) == 0) {
+			if ((DMAControl & 0x40) == 0) {
 				// 8-bit data
 				for (size_t i = dmaaddr; i < dma_end; ++i)
-					myGUS->ram[i] ^= 0x80;
+					ram[i] ^= 0x80;
 			} else {
 				// 16-bit data
 				for (size_t i = dmaaddr + 1; i < dma_end; i += 2)
-					myGUS->ram[i] ^= 0x80;
+					ram[i] ^= 0x80;
 			}
 		}
 		// Writing to dma
 	} else {
-		chan->Write(chan->currcnt + 1, &myGUS->ram[dmaaddr]);
+		chan->Write(chan->currcnt + 1, &ram[dmaaddr]);
 	}
 	/* Raise the TC irq if needed */
-	if ((myGUS->DMAControl & 0x20) != 0) {
-		myGUS->IRQStatus |= 0x80;
-		myGUS->GUS_CheckIRQ();
+	if ((DMAControl & 0x20) != 0) {
+		IRQStatus |= 0x80;
+		GUS_CheckIRQ();
 	}
 	chan->Register_Callback(0);
 }
@@ -1198,8 +1201,8 @@ void Gus::PopulatePanScalars()
 		pan_scalars.at(pos).left = static_cast<float>(cos(angle));
 		pan_scalars.at(pos).right = static_cast<float>(sin(angle));
 		// DEBUG_LOG_MSG("GUS: pan_scalar[%u] = %f | %f", pos,
-		// myGUS->myGUS->pan_scalars.at(pos).left,
-		// myGUS->myGUS->pan_scalars.at(pos).right);
+		// pan_scalars.at(pos).left,
+		// pan_scalars.at(pos).right);
 	}
 }
 
