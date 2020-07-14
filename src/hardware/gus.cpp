@@ -88,7 +88,7 @@ public:
 		uint32_t wave = 0u;
 	};
 
-	Gus(size_t base, uint32_t d1, uint32_t d2, uint32_t i1, uint32_t i2);
+	Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &dir);
 	~Gus();
 	Gus() = delete;
 	Gus(const Gus &) = delete;            // prevent copying
@@ -97,6 +97,7 @@ public:
 	void GUS_CheckIRQ();
 	void CheckVoiceIrq();
 	bool SoftLimit(float (&)[64][2], int16_t (&)[64][2], uint16_t);
+	void PopulateAutoExec(uint16_t port, const std::string &dir);
 	void PopulateVolScalars();
 	void PopulatePanScalars();
 	void GUS_CallBack(uint16_t len);
@@ -109,6 +110,7 @@ public:
 	void WriteToPort(Bitu port, Bitu val, Bitu iolen);
 
 	Timer timers[2] = {};
+	AutoexecObject autoexecline[2] = {};
 	std::array<Frame, GUS_PAN_POSITIONS> pan_scalars = {};
 	std::array<float, GUS_VOLUME_POSITIONS> vol_scalars = {{0.0f}};
 	std::array<GUSChannels *, GUS_MAX_CHANNELS> guschan = {{nullptr}};
@@ -422,12 +424,12 @@ void GUSChannels::WriteWaveCtrl(uint8_t val)
 		voice_irqs.check();
 }
 
-Gus::Gus(size_t base, uint32_t d1, uint32_t d2, uint32_t i1, uint32_t i2)
-        : portbase(base),
-          dma1(d1),
-          dma2(d2),
-          irq1(i1),
-          irq2(i2)
+Gus::Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &ultradir)
+        : portbase(port - 0x200),
+          dma1(dma),
+          dma2(dma),
+          irq1(irq),
+          irq2(irq)
 {
 	// Create the internal voice channels
 	for (uint8_t chan_ct = 0; chan_ct < GUS_MAX_CHANNELS; chan_ct++) {
@@ -470,12 +472,42 @@ Gus::Gus(size_t base, uint32_t d1, uint32_t d2, uint32_t i1, uint32_t i2)
 	gus_chan = MixerChan.Install(std::bind(&Gus::GUS_CallBack, this,
 	                                       std::placeholders::_1),
 	                             1, "GUS");
+
+	// Populate the volume and pan tables
+	PopulateVolScalars();
+	PopulatePanScalars();
+
+	// Reset the DSP
+	gRegData = 0x1;
+	GUSReset();
+	gRegData = 0x0;
+
+	PopulateAutoExec(port, ultradir);
 }
 
 Gus::~Gus()
 {
+	gRegData = 0x1;
+	GUSReset();
+	gRegData = 0x0;
 	for (auto voice : guschan)
 		delete voice;
+}
+
+void Gus::PopulateAutoExec(uint16_t port, const std::string &ultradir)
+{
+	// ULTRASND=Port,(rec)DMA1,(pcm)DMA2,(play)IRQ1,(midi)IRQ2
+	std::ostringstream sndline;
+	sndline << "SET ULTRASND=" << std::hex << std::setw(3)
+	        << portbase + 0x200 << "," << std::dec << static_cast<int>(dma1)
+	        << "," << static_cast<int>(dma2) << "," << static_cast<int>(irq1)
+	        << "," << static_cast<int>(irq2) << std::ends;
+	LOG_MSG("GUS: %s", sndline.str().c_str());
+	autoexecline[0].Install(sndline.str());
+
+	// ULTRADIR=full path to directory containing "midi"
+	std::string dirline = "SET ULTRADIR=" + ultradir;
+	autoexecline[1].Install(dirline);
 }
 
 void Gus::PrintStats()
@@ -1079,9 +1111,9 @@ bool Gus::SoftLimit(float (&in)[GUS_BUFFER_FRAMES][2],
 		peak_amplitude.left -= release_amount;
 	if (peak_amplitude.right > max_allowed)
 		peak_amplitude.right -= release_amount;
-	// LOG_MSG("GUS: releasing myGUS->peak_amplitude = %.2f | %.2f",
-	//         static_cast<double>(myGUS->peak_amplitude.left),
-	//         static_cast<double>(myGUS->peak_amplitude.right));
+	// LOG_MSG("GUS: releasing peak_amplitude = %.2f | %.2f",
+	//         static_cast<double>(peak_amplitude.left),
+	//         static_cast<double>(peak_amplitude.right));
 	return true;
 }
 
@@ -1171,74 +1203,24 @@ void Gus::PopulatePanScalars()
 	}
 }
 
-class GUS : public Module_base {
-private:
-	AutoexecObject autoexecline[2];
-
-public:
-	GUS(Section *configuration) : Module_base(configuration)
-	{
-		if (!IS_EGAVGA_ARCH)
-			return;
-		Section_prop *section = static_cast<Section_prop *>(configuration);
-		if (!section->Get_bool("gus"))
-			return;
-		const size_t portbase = section->Get_hex("gusbase") - 0x200;
-		int dma_val = section->Get_int("gusdma");
-		if ((dma_val < 0) || (dma_val > 255))
-			dma_val = 3; // sensible default
-		int irq_val = section->Get_int("gusirq");
-		if ((irq_val < 0) || (irq_val > 255))
-			irq_val = 5; // sensible default
-
-		myGUS = new Gus(portbase, dma_val, dma_val, irq_val, irq_val);
-
-		myGUS->PopulateVolScalars();
-		myGUS->PopulatePanScalars();
-
-		myGUS->gRegData = 0x1;
-		myGUS->GUSReset();
-		myGUS->gRegData = 0x0;
-		const Bitu portat = 0x200 + myGUS->portbase;
-
-		// ULTRASND=Port,DMA1,DMA2,IRQ1,IRQ2
-		// [GUS port], [GUS DMA (recording)], [GUS DMA (playback)], [GUS
-		// IRQ (playback)], [GUS IRQ (MIDI)]
-		std::ostringstream temp;
-		temp << "SET ULTRASND=" << std::hex << std::setw(3) << portat
-		     << "," << std::dec << (Bitu)myGUS->dma1 << ","
-		     << (Bitu)myGUS->dma2 << "," << (Bitu)myGUS->irq1 << ","
-		     << (Bitu)myGUS->irq2 << std::ends;
-		// Create autoexec.bat lines
-		autoexecline[0].Install(temp.str());
-		autoexecline[1].Install(std::string("SET ULTRADIR=") +
-		                        section->Get_string("ultradir"));
-	}
-
-	~GUS()
-	{
-		if (!IS_EGAVGA_ARCH)
-			return;
-		Section_prop *section = static_cast<Section_prop *>(m_configuration);
-		if (!section->Get_bool("gus"))
-			return;
-
-		myGUS->gRegData = 0x1;
-		myGUS->GUSReset();
-		myGUS->gRegData = 0x0;
-		delete myGUS;
-	}
-};
-
-static GUS *test;
-
 void GUS_ShutDown(Section * /*sec*/)
 {
-	delete test;
+	delete myGUS;
 }
 
 void GUS_Init(Section *sec)
 {
-	test = new GUS(sec);
+	if (!IS_EGAVGA_ARCH)
+		return;
+	Section_prop *conf = dynamic_cast<Section_prop *>(sec);
+	if (!conf->Get_bool("gus"))
+		return;
+	const uint16_t port = conf->Get_hex("gusbase");
+	const uint8_t dma = clamp(conf->Get_int("gusdma"), 1, 255);
+	const uint8_t irq = clamp(conf->Get_int("gusirq"), 1, 255);
+	LOG_MSG("GUS init dma %u, irq %u, port %u", dma, irq, port);
+	const std::string ultradir = conf->Get_string("ultradir");
+
+	myGUS = new Gus(port, dma, irq, ultradir);
 	sec->AddDestroyFunction(&GUS_ShutDown, true);
 }
