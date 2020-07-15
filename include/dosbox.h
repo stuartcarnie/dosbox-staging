@@ -24,7 +24,12 @@
 #include "compiler.h"
 #include "types.h"
 
-GCC_ATTRIBUTE(noreturn) void E_Exit(const char * message,...) GCC_ATTRIBUTE( __format__(__printf__, 1, 2));
+//--Added 2010-05-30 by Alun Bestor to ensure sdlmain function calls are replaced throughout DOSBox
+#include "BXCoalface.h"
+//--End of modifications
+
+
+//GCC_ATTRIBUTE(noreturn) void E_Exit(const char * message,...) GCC_ATTRIBUTE( __format__(__printf__, 1, 2));
 
 void MSG_Add(const char*,const char*); //add messages to the internal languagefile
 const char* MSG_Get(char const *);     //get messages from the internal languagefile

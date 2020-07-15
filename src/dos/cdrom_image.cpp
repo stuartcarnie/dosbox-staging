@@ -519,10 +519,14 @@ bool CDROM_Interface_Image::SetDevice(char* path)
 	const bool result = LoadCueSheet(path) || LoadIsoFile(path);
 	if (!result) {
 		// print error message on dosbox console
+		//--Disabled 2012-11-07 by Alun Bestor: this is already covered by our own error messages.
+		/*
 		char buf[MAX_LINE_LENGTH];
 		snprintf(buf, MAX_LINE_LENGTH, "Could not load image file: %s\r\n", path);
 		Bit16u size = (Bit16u)strlen(buf);
 		DOS_WriteFile(STDOUT, (Bit8u*)buf, &size);
+		 */
+		//--End of modifications
 	}
 	return result;
 }

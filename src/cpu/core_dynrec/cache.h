@@ -627,7 +627,7 @@ static void cache_init(bool enable) {
 			cache_code=cache_code+PAGESIZE_TEMP;
 
 #if (C_HAVE_MPROTECT)
-			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_WRITE|PROT_READ|PROT_EXEC))
+			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_WRITE|PROT_READ) != 0)
 				LOG_MSG("Setting execute permission on the code cache has failed");
 #endif
 			CacheBlockDynRec * block=cache_getblock();

@@ -881,6 +881,9 @@ Channel* Channel::BlockTemplate( Chip* chip, Bit32u samples, Bit32s* output ) {
 	case sm2Percussion:
 	case sm3Percussion:
 		break;
+    //--Added 2011-10-16 by Alun Bestor: only here to silence LLVM 3.0 warning
+    default:
+        break;
 	}
 	//Init the operators with the the current vibrato and tremolo values
 	Op( 0 )->Prepare( chip );
@@ -949,6 +952,9 @@ Channel* Channel::BlockTemplate( Chip* chip, Bit32u samples, Bit32s* output ) {
 		case sm2Percussion:
 		case sm3Percussion:
 			break;
+        //--Added 2011-10-16 by Alun Bestor: only here to silence LLVM 3.0 warning
+        default:
+            break;
 		}
 	}
 	switch( mode ) {

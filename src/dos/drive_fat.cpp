@@ -30,6 +30,10 @@
 #include "bios.h"
 #include "bios_disk.h"
 
+//--Added 2011-04-18 by Alun Bestor to fix FAT image endianness bugs
+#import "BXCoalfaceDrives.h"
+//--endif
+
 #define IMGTYPE_FLOPPY 0
 #define IMGTYPE_ISO    1
 #define IMGTYPE_HDD	   2
@@ -723,6 +727,9 @@ fatDrive::fatDrive(const char *sysFilename,
 	  fatSectBuffer{0},
 	  curFatSect(0)
 {
+	//--Added 2009-10-25 by Alun Bestor to allow Boxer to track the system path for DOSBox drives
+	safe_strcpy(systempath, sysFilename);
+	//--End of modifications
 	FILE *diskfile;
 	Bit32u filesize;
 	bool is_hdd;
@@ -752,7 +759,15 @@ fatDrive::fatDrive(const char *sysFilename,
 
 		loadedDisk->Read_Sector(0,0,1,&mbrData);
 
-		if(mbrData.magic1!= 0x55 ||	mbrData.magic2!= 0xaa) LOG_MSG("Possibly invalid partition table in disk image.");
+		if(mbrData.magic1!= 0x55 ||	mbrData.magic2!= 0xaa)
+        {
+            LOG_MSG("Possibly invalid partition table in disk image.");
+			
+            //--Added 2011-07-22 by Alun Bestor to bail out of reading invalid images
+            created_successfully = false;
+            return;
+            //--End of modifications
+        }
 
 		startSector = 63;
 		int m;
@@ -851,6 +866,11 @@ fatDrive::fatDrive(const char *sysFilename,
 	if ((bootbuffer.magic1 != 0x55) || (bootbuffer.magic2 != 0xaa)) {
 		/* Not a FAT filesystem */
 		LOG_MSG("Loaded image has no valid magicnumbers at the end!");
+		
+        //--Added 2011-07-22 by Alun Bestor to bail out of reading invalid images
+		created_successfully = false;
+		return;
+        //--End of modifications
 	}
 
 	/* Sanity checks */

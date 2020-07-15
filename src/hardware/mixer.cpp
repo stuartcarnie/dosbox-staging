@@ -39,7 +39,7 @@
 #include <mmsystem.h>
 #endif
 
-#include <SDL.h>
+#include "SDL.h"
 
 #include "mem.h"
 #include "pic.h"
@@ -52,6 +52,10 @@
 #include "hardware.h"
 #include "programs.h"
 #include "midi.h"
+
+//--Added 2012-02-26 by Alun Bestor to give Boxer control over the mixer.
+#import "BXCoalfaceAudio.h"
+//--End of modifications
 
 #define MIXER_SSIZE 4
 
@@ -159,8 +163,12 @@ static void MIXER_UnlockAudioDevice()
 
 void MixerChannel::UpdateVolume()
 {
-	volmul[0]=(Bits)((1 << MIXER_VOLSHIFT)*scale[0]*volmain[0]*mixer.mastervol[0]);
-	volmul[1]=(Bits)((1 << MIXER_VOLSHIFT)*scale[1]*volmain[1]*mixer.mastervol[1]);
+	//--Modified 2012-02-26 by Alun Bestor to give Boxer control over master volume
+	//volmul[0]=(Bits)((1 << MIXER_VOLSHIFT)*scale[0]*volmain[0]*mixer.mastervol[0]);
+	//volmul[1]=(Bits)((1 << MIXER_VOLSHIFT)*scale[1]*volmain[1]*mixer.mastervol[1]);
+	volmul[0]=(Bits)((1 << MIXER_VOLSHIFT)*scale[0]*volmain[0]*boxer_masterVolume(BXLeftChannel));
+	volmul[1]=(Bits)((1 << MIXER_VOLSHIFT)*scale[1]*volmain[1]*boxer_masterVolume(BXRightChannel));
+	//--End of modifications
 }
 
 void MixerChannel::SetVolume(float _left,float _right) {
@@ -796,7 +804,10 @@ public:
 		}
 		if (cmd->FindExist("/NOSHOW")) return;
 		WriteOut("Channel  Main    Main(dB)\n");
-		ShowVolume("MASTER",mixer.mastervol[0],mixer.mastervol[1]);
+        //--Modified 2012-02-26 by Alun Bestor to show Boxer's master volume instead.
+		//ShowVolume("MASTER",mixer.mastervol[0],mixer.mastervol[1]);
+        ShowVolume("MASTER", boxer_masterVolume(BXLeftChannel), boxer_masterVolume(BXRightChannel));
+        //--End of modifications
 		for (chan = mixer.channels;chan;chan = chan->next)
 			ShowVolume(chan->name,chan->volmain[0],chan->volmain[1]);
 	}
@@ -899,3 +910,16 @@ void MIXER_CloseAudioDevice()
 		}
 	}
 }
+
+
+//--Added 2012-02-26 by Alun Bestor to give Boxer an easy way to update channel volumes.
+void boxer_updateVolumes()
+{
+    MixerChannel *source=mixer.channels;
+    while (source)
+    {
+        source->UpdateVolume();
+        source=source->next;
+    }
+}
+//--End of modifications

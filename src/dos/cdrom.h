@@ -29,8 +29,8 @@
 #include <string>
 #include <vector>
 
-#include <SDL.h>
-#include <SDL_thread.h>
+#include "SDL.h"
+#include "SDL_thread.h"
 
 #include "dosbox.h"
 #include "support.h"

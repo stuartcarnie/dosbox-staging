@@ -934,3 +934,57 @@ void VGA_SetupOther(void) {
 	}
 
 }
+
+
+//--Added 2013-02-10 by Alun Bestor to give Boxer control over Hercules graphics options
+Bit8u boxer_herculesTintMode()
+{
+    return herc_pal;
+}
+
+void boxer_setHerculesTintMode(Bit8u mode)
+{
+    if (herc_pal != mode)
+    {
+        herc_pal = mode % 3;
+        if (machine == MCH_HERC)
+        {
+            Herc_Palette();
+            VGA_DAC_CombineColor(1,7);
+        }
+    }
+}
+
+double boxer_CGACompositeHueOffset()
+{
+    return hue_offset;
+}
+
+void boxer_setCGACompositeHueOffset(double offset)
+{
+    if (offset != hue_offset)
+    {
+        hue_offset = offset;
+        if (machine == MCH_CGA)
+        {
+            update_cga16_color();
+        }
+    }
+}
+
+//--Added 2019-10-18 by C.W. Betts to give Boxer control over CGA composite mode
+Bit8u boxer_CGAComponentMode(void)
+{
+	return cga_comp;
+}
+
+void boxer_setCGAComponentMode(Bit8u newCGA)
+{
+	cga_comp = newCGA;
+	if (cga_comp>2) cga_comp=0;
+	if (vga.tandy.mode_control & 0x2) {
+		write_cga(0x3d8,vga.tandy.mode_control,1);
+	}
+}
+//--End of modifications
+

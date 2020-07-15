@@ -28,6 +28,10 @@
 #include "callback.h"
 #include "support.h"
 
+//--Added 2010-01-21 by Alun Bestor to let Boxer hook into DOSBox internals
+#include "BXCoalface.h"
+//--End of modifications
+
 void DOS_Shell::ShowPrompt(void) {
 	Bit8u drive=DOS_GetDefaultDrive()+'A';
 	char dir[DOS_PATHLENGTH];
@@ -56,12 +60,45 @@ void DOS_Shell::InputCommand(char * line) {
 
 	while (size) {
 		dos.echo=false;
-		while(!DOS_ReadFile(input_handle,&c,&n)) {
+		
+		//--Modified 2012-08-19 by Alun Bestor to let Boxer inject its own input
+        //and cancel keyboard input listening.
+        boxer_shellWillReadCommandInputFromHandle(this, input_handle);
+		while(boxer_continueListeningForKeyEvents() && !DOS_ReadFile(input_handle,&c,&n)) {
 			Bit16u dummy;
 			DOS_CloseFile(input_handle);
 			DOS_OpenFile("con",2,&dummy);
 			LOG(LOG_MISC,LOG_ERROR)("Reopening the input handle. This is a bug!");
 		}
+        boxer_shellDidReadCommandInputFromHandle(this, input_handle);
+		
+        if (!boxer_shellShouldContinue(this))
+        {
+            return;
+        }
+
+		bool executeImmediately = false;
+		if (boxer_handleShellCommandInput(this, line, &str_index, &executeImmediately))
+		{
+			if (executeImmediately)
+			{
+				size = 0;
+				break;
+			}
+			else
+			{
+				//Correct the visible cursor position and the cached lengths
+				str_len = strlen(line);
+				size = CMD_MAXLINE - str_len - 2;
+				int cursorOffset = str_len - str_index;
+				while (cursorOffset > 0) {
+					outc(8); cursorOffset--;
+				}
+				continue;
+			}
+		}
+		//--End of modifications
+		
 		if (!n) {
 			size=0;			//Kill the while loop
 			continue;
@@ -440,20 +477,34 @@ bool DOS_Shell::Execute(char * name,char * args) {
 			return false;
 	}
 
-	if (strcasecmp(extension, ".bat") == 0) 
+	//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
+	char canonicalPath[DOS_PATHLENGTH+4];
+	DOS_Canonicalize(fullname, canonicalPath);
+	//--End of modifications
+	if (strcasecmp(extension, ".bat") == 0)
 	{	/* Run the .bat file */
 		/* delete old batch file if call is not active*/
 		bool temp_echo=echo; /*keep the current echostate (as delete bf might change it )*/
 		if(bf && !call) delete bf;
+		
+		//--Added 2010-01-21 by Alun Bestor to let Boxer track the launched batch file
+		boxer_shellWillBeginBatchFile(this, canonicalPath, args);
+		
 		bf=new BatchFile(this,fullname,name,line);
 		echo=temp_echo; //restore it.
-	} 
+		
+		//--Note: boxer_didEndBatchFile will be called once the batch file completes much later, in the batch file's own destructor.
+		//--End of modifications
+	}
 	else 
 	{	/* only .bat .exe .com extensions maybe be executed by the shell */
 		if(strcasecmp(extension, ".com") !=0) 
 		{
 			if(strcasecmp(extension, ".exe") !=0) return false;
 		}
+		//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
+		boxer_shellWillExecuteFileAtDOSPath(this, canonicalPath, args);
+		//--End of modifications
 		/* Run the .exe or .com file from the shell */
 		/* Allocate some stack space for tables in physical memory */
 		reg_sp-=0x200;
@@ -544,6 +595,10 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		reg_eip=oldeip;
 		SegSet16(cs,oldcs);
 #endif
+		
+        //--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
+        boxer_shellDidExecuteFileAtDOSPath(this, canonicalPath);
+        //--End of modifications
 	}
 	return true; //Executable started
 }

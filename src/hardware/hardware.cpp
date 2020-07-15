@@ -80,6 +80,9 @@ static struct {
 #endif
 } capture;
 
+//Overridden 2014-11-30 by Alun Bestor to allow Boxer to decide where captured files should go and what they should be named.
+
+/*
 FILE * OpenCaptureFile(const char * type,const char * ext) {
 	if(capturedir.empty()) {
 		LOG_MSG("Please specify a capture directory");
@@ -88,7 +91,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 
 	char file_start[16];
 	dir_information * dir;
-	/* Find a filename to open */
+	// Find a filename to open
 	dir = open_directory(capturedir.c_str());
 	if (!dir) {
 		//Try creating it first
@@ -121,7 +124,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 	char file_name[CROSS_LEN];
 	sprintf(file_name, "%s%c%s%03d%s",
 	        capturedir.c_str(), CROSS_FILESPLIT, file_start, last, ext);
-	/* Open the actual file */
+	// Open the actual file 
 	FILE * handle=fopen(file_name,"wb");
 	if (handle) {
 		LOG_MSG("Capturing %s to %s",type,file_name);
@@ -130,6 +133,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 	}
 	return handle;
 }
+*/
 
 #if (C_SSHOT)
 static void CAPTURE_AddAviChunk(const char * tag, Bit32u size, void * data, Bit32u flags) {

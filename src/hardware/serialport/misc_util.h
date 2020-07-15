@@ -53,7 +53,7 @@
  #define CAPWORD NETWRAPPER_TCP
 #endif
 
-#include <SDL_net.h>
+#include "SDL_net.h"
 
 uint32_t Netwrapper_GetCapabilities();
 

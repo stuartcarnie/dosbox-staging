@@ -20,7 +20,7 @@
 
 #if C_IPX
 
-#include <SDL_net.h>
+#include "SDL_net.h"
 
 #include <string.h>
 #include <time.h>

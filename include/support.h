@@ -32,7 +32,7 @@
 #include <string.h>
 #include <string>
 
-#include <SDL.h>
+#include "SDL.h"
 
 #ifdef _MSC_VER
 #define strcasecmp(a, b) _stricmp(a, b)

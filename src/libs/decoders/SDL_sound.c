@@ -35,8 +35,8 @@
 #  include <config.h>
 #endif
 
-#include <SDL.h>
-#include <SDL_thread.h>
+#include "SDL.h"
+#include "SDL_thread.h"
 #include "SDL_sound.h"
 
 #define __SDL_SOUND_INTERNAL__

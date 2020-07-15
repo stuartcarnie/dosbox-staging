@@ -16,7 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#include <SDL.h>
+#include "SDL.h"
 
 #include "dosbox.h"
 #include "callback.h"
@@ -158,6 +158,11 @@ static void add_key(Bit16u code) {
 }
 
 static bool get_key(Bit16u &code) {
+    //--Added 2012-04-15 to let Boxer insert its own keys
+    if (boxer_getNextKeyCodeInPasteBuffer(&code, true))
+        return true;
+    //--End of modifications
+    
 	Bit16u start,end,head,tail,thead;
 	if (machine==MCH_PCJR) {
 		/* should be done for cga and others as well, to be tested */
@@ -179,6 +184,11 @@ static bool get_key(Bit16u &code) {
 }
 
 static bool check_key(Bit16u &code) {
+    //--Added 2012-04-15 to let Boxer insert its own keys
+    if (boxer_getNextKeyCodeInPasteBuffer(&code, false))
+        return true;
+    //--End of modifications
+    
 	Bit16u head,tail;
 	head =mem_readw(BIOS_KEYBOARD_BUFFER_HEAD);
 	tail =mem_readw(BIOS_KEYBOARD_BUFFER_TAIL);
@@ -295,7 +305,9 @@ static Bitu IRQ1_Handler(void) {
 		}
 		break;
 	case 0x3a:flags2 |=0x40;break;//CAPSLOCK
-	case 0xba:flags1 ^=0x40;flags2 &=~0x40;leds ^=0x04;break;
+		//--Modified 2011-03-13 by Alun Bestor to let Boxer sniff the state of lock keys.
+	case 0xba:flags1 ^=0x40;flags2 &=~0x40;leds ^=0x04;boxer_setCapsLockActive(flags1 & 0x40);break;
+		//--End of modifications
 	case 0x45:
 		if (flags3 &0x01) {
 			/* last scancode of pause received; first remove 0xe1-prefix */
@@ -327,10 +339,13 @@ static Bitu IRQ1_Handler(void) {
 			flags1^=0x20;
 			leds^=0x02;
 			flags2&=~0x20;
+			//--Added 2011-03-13 by Alun Bestor to let Boxer sniff the state of lock keys.
+			boxer_setNumLockActive(flags1 & 0x20);
+			//--End of modifications
 		}
 		break;
 	case 0x46:flags2 |=0x10;break;				/* Scroll Lock SDL Seems to do this one fine (so break and make codes) */
-	case 0xc6:flags1 ^=0x10;flags2 &=~0x10;leds ^=0x01;break;
+	case 0xc6:flags1 ^=0x10;flags2 &=~0x10;leds ^=0x01;boxer_setScrollLockActive(flags1 & 0x10);break;
 //	case 0x52:flags2|=128;break;//See numpad					/* Insert */
 	case 0xd2:	
 		if(flags3&0x02) { /* Maybe honour the insert on keypad as well */
@@ -466,6 +481,14 @@ static bool IsEnhancedKey(Bit16u &key) {
 
 static Bitu INT16_Handler(void) {
 	Bit16u temp=0;
+    
+    //--Added 2012-08-19 by Alun Bestor to let Boxer interrupt keyboard listening loops
+    if (!boxer_continueListeningForKeyEvents())
+    {
+        return CBRET_STOP;
+    }
+    //--End of modifications
+    
 	switch (reg_ah) {
 	case 0x00: /* GET KEYSTROKE */
 		if ((get_key(temp)) && (!IsEnhancedKey(temp))) {

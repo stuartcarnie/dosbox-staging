@@ -33,6 +33,10 @@ Bitu call_shellstop;
  * remove things from the environment */
 DOS_Shell * first_shell = 0;
 
+//--Added 2013-09-22 by Alun Bestor to track the currently active shell
+DOS_Shell *currentShell = NULL;
+//--End of modifications
+
 static Bitu shellstop_handler(void) {
 	return CBRET_STOP;
 }
@@ -326,6 +330,12 @@ void DOS_Shell::RunInternal(void) {
 }
 
 void DOS_Shell::Run(void) {
+    //--Added 2013-09-22 by Alun Bestor to keep a record of the currently-processing shell
+    boxer_shellWillStart(this);
+    DOS_Shell *previousShell = currentShell;
+    currentShell = this;
+    //--End of modifications
+	
 	char input_line[CMD_MAXLINE] = {0};
 	std::string line;
 	if (cmd->FindStringRemainBegin("/C",line)) {
@@ -336,12 +346,23 @@ void DOS_Shell::Run(void) {
 		temp.echo = echo;
 		temp.ParseLine(input_line);		//for *.exe *.com  |*.bat creates the bf needed by runinternal;
 		temp.RunInternal();				// exits when no bf is found.
+		//--Added 2013-09-22 by Alun Bestor to keep a record of the currently-processing shell
+		currentShell = previousShell;
+		boxer_shellDidFinish(this);
+		//--End of modifications
 		return;
 	}
 	/* Start a normal shell and check for a first command init */
 	if (cmd->FindString("/INIT",line,true)) {
-		const bool wants_welcome_banner = control->GetStartupVerbosity() >=
-		                                  Verbosity::Medium;
+		//--Added 2020-07-14 by Alun Bestor to let Boxer monitor the autoexec process
+		boxer_shellWillStartAutoexec(this);
+		//--End of modifications
+
+		//--Modified 2012-08-19 by Alun Bestor to allow selective overriding of the startup messages.
+		const bool wants_welcome_banner = (control->GetStartupVerbosity() >=
+		                                  Verbosity::Medium) ||
+										  boxer_shellShouldDisplayStartupMessages(this);
+		//--End of modifications
 		if (wants_welcome_banner) {
 			WriteOut(MSG_Get("SHELL_STARTUP_BEGIN"), VERSION);
 #if C_DEBUG
@@ -364,8 +385,14 @@ void DOS_Shell::Run(void) {
 		WriteOut(MSG_Get("SHELL_STARTUP_SUB"),VERSION);
 	}
 	do {
-		if (bf){
-			if(bf->ReadLine(input_line)) {
+        //--Added 2012-08-19 by Alun Bestor to let Boxer insert its own commands into batch processing.
+        if (boxer_hasPendingCommandsForShell(this))
+        {
+            boxer_executeNextPendingCommandForShell(this);
+        }
+		else if (bf){
+        //--End of modifications
+            if(bf->ReadLine(input_line)) {
 				if (echo) {
 					if (input_line[0]!='@') {
 						ShowPrompt();
@@ -377,11 +404,25 @@ void DOS_Shell::Run(void) {
 				if (echo) WriteOut("\n");
 			}
 		} else {
+			//--Added 2009-11-29 by Alun Bestor as a hook for detecting when control has returned to the DOS prompt.
+			boxer_didReturnToShell(this);
+			//--End of modifications
 			if (echo) ShowPrompt();
 			InputCommand(input_line);
+			//--Added 2012-08-19 by Alun Bestor to let Boxer interrupt the command input with its own commands.
+			if (boxer_shellShouldContinue(this) && !boxer_hasPendingCommandsForShell(this))
+			{
+				//--End of modifications
 			ParseLine(input_line);
+				if (echo && !bf) WriteOut_NoParsing("\n");
+			}
 		}
-	} while (!exit_flag);
+	} while (boxer_shellShouldContinue(this) && !exit_flag);
+	
+	//--Added 2013-09-22 by Alun Bestor to keep a record of the currently-processing shell
+	currentShell = previousShell;
+	boxer_shellDidFinish(this);
+	//--End of modifications
 }
 
 void DOS_Shell::SyntaxError(void) {

@@ -24,7 +24,7 @@
 #include <string>
 #include <algorithm>
 
-#include <SDL.h>
+#include "SDL.h"
 
 #include "cross.h"
 #include "support.h"
@@ -33,6 +33,10 @@
 #include "pic.h"
 #include "hardware.h"
 #include "timer.h"
+
+//--Added 2011-09-25 by Alun Bestor to let Boxer hook into MIDI messaging
+#include "BXCoalfaceAudio.h"
+//--End of modifications
 
 #define RAWBUF	1024
 
@@ -71,31 +75,35 @@ MidiHandler Midi_none;
 /* Include different midi drivers, lowest ones get checked first for default.
    Each header provides an independent midi interface. */
 
-#if defined(MACOSX)
+//--Disabled 2011-09-25 by Alun Bestor: all MIDI handling is now done by Boxer
 
-#if defined(C_SUPPORTS_COREMIDI)
-#include "midi_coremidi.h"
-#endif
+//#if defined(MACOSX)
+//
+//#if defined(C_SUPPORTS_COREMIDI)
+//#include "midi_coremidi.h"
+//#endif
+//
+//#if defined(C_SUPPORTS_COREAUDIO)
+//#include "midi_coreaudio.h"
+//#endif
+//
+//#elif defined (WIN32)
+//
+//#include "midi_win32.h"
+//
+//#else
+//
+//#include "midi_oss.h"
+//
+//#endif
+//
+//#if defined (HAVE_ALSA)
+//
+//#include "midi_alsa.h"
+//
+//#endif
 
-#if defined(C_SUPPORTS_COREAUDIO)
-#include "midi_coreaudio.h"
-#endif
-
-#elif defined (WIN32)
-
-#include "midi_win32.h"
-
-#else
-
-#include "midi_oss.h"
-
-#endif
-
-#if defined (HAVE_ALSA)
-
-#include "midi_alsa.h"
-
-#endif
+//--End of modifications
 
 struct DB_Midi {
 	uint8_t status;
@@ -140,7 +148,10 @@ void MIDI_RawOutByte(uint8_t data)
 	/* Test for a realtime MIDI message */
 	if (data>=0xf8) {
 		midi.rt_buf[0]=data;
-		midi.handler->PlayMsg(midi.rt_buf);
+		//--Replaced 2011-09-25 by Alun Bestor to pass messages on to our own MIDI handling
+		//midi.handler->PlayMsg(midi.rt_buf);
+		boxer_sendMIDIMessage(midi.rt_buf);
+		//--End of modifications
 		return;
 	}
 	/* Test for a active sysex tranfer */
@@ -155,7 +166,10 @@ void MIDI_RawOutByte(uint8_t data)
 				LOG(LOG_ALL,LOG_ERROR)("MIDI:Skipping invalid MT-32 SysEx midi message (too short to contain a checksum)");
 			} else {
 //				LOG(LOG_ALL,LOG_NORMAL)("Play sysex; address:%02X %02X %02X, length:%4d, delay:%3d", midi.sysex.buf[5], midi.sysex.buf[6], midi.sysex.buf[7], midi.sysex.used, midi.sysex.delay);
-				midi.handler->PlaySysex(midi.sysex.buf, midi.sysex.used);
+				//--Replaced 2011-09-25 by Alun Bestor to pass messages on to our own MIDI handling
+				//midi.handler->PlaySysex(midi.sysex.buf, midi.sysex.used);
+				boxer_sendMIDISysex(midi.sysex.buf, midi.sysex.used);
+				//--End of modifications
 				if (midi.sysex.start) {
 					if (midi.sysex.buf[5] == 0x7F) {
 						midi.sysex.delay = 290; // All Parameters reset
@@ -165,6 +179,10 @@ void MIDI_RawOutByte(uint8_t data)
 						midi.sysex.delay = 30; // Dark Sun 1
 					} else {
 						midi.sysex.delay = delay_in_ms(midi.sysex.used);
+						//--Added 2011-04-20 by Alun Bestor as a quick fix for Colonel's Bequest,
+						//which is very time-sensitive and sends way too many sysex messages to fix one-by-one
+						if (midi.sysex.delay < 40) midi.sysex.delay = 40;
+						//--End of modifications
 					}
 					midi.sysex.start = GetTicks();
 				}
@@ -191,16 +209,20 @@ void MIDI_RawOutByte(uint8_t data)
 			if (CaptureState & CAPTURE_MIDI) {
 				CAPTURE_AddMidi(false, midi.cmd_len, midi.cmd_buf);
 			}
-			midi.handler->PlayMsg(midi.cmd_buf);
+			//--Replaced 2011-09-25 by Alun Bestor to pass messages on to our own MIDI handling
+			//midi.handler->PlayMsg(midi.cmd_buf);
+			boxer_sendMIDIMessage(midi.cmd_buf);
+			//--End of modifications
 			midi.cmd_pos=1;		//Use Running status
 		}
 	}
 }
 
-bool MIDI_Available()
-{
-	return midi.available;
-}
+//--Disabled 2011-09-25 by Alun Bestor to let Boxer field such questions itself
+//bool MIDI_Available(void)  {
+//    return midi.available;
+//}
+//--End of modifications
 
 class MIDI:public Module_base{
 public:
@@ -208,9 +230,14 @@ public:
 		Section_prop * section=static_cast<Section_prop *>(configuration);
 		const char * dev=section->Get_string("mididevice");
 		std::string fullconf=section->Get_string("midiconfig");
+		//--Added 2011-09-25 by Alun Bestor to let Boxer pick up on the suggested MIDI device
+		boxer_suggestMIDIHandler(dev, fullconf.c_str());
+		//--End of modifications
 		/* If device = "default" go for first handler that works */
 		MidiHandler * handler;
 //		MAPPER_AddHandler(MIDI_SaveRawEvent,MK_f8,MMOD1|MMOD2,"caprawmidi","Cap MIDI");
+        //Disabled 2011-09-30 by Alun Bestor: Boxer now handles sysex delays itself
+		/*
 		midi.sysex.delay = 0;
 		midi.sysex.start = 0;
 		if (fullconf.find("delaysysex") != std::string::npos) {
@@ -218,11 +245,16 @@ public:
 			fullconf.erase(fullconf.find("delaysysex"));
 			LOG_MSG("MIDI: Using delayed SysEx processing");
 		}
+		 */
 		trim(fullconf);
 		const char * conf = fullconf.c_str();
 		midi.status=0x00;
 		midi.cmd_pos=0;
 		midi.cmd_len=0;
+		//--Modified 2011-09-25 by Alun Bestor: DOSBox's MIDI handlers are all disabled,
+		//so skip straight to the 'none' handler.
+		goto getdefault;
+		//--End of modifications
 		if (!strcasecmp(dev,"default")) goto getdefault;
 		handler=handler_list;
 		while (handler) {
