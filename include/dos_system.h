@@ -86,15 +86,17 @@ public:
 	virtual bool	Seek(Bit32u * pos,Bit32u type)=0;
 	virtual bool	Close()=0;
 	virtual Bit16u	GetInformation(void)=0;
-	virtual bool	IsOpen()					{ return open; };
-	virtual void	AddRef()					{ refCtr++; };
-	virtual Bits	RemoveRef()					{ return --refCtr; };
-	virtual bool	UpdateDateTimeFromHost()	{ return true; }
+
+	virtual bool IsOpen() { return open; }
+	virtual void AddRef() { refCtr++; }
+	virtual Bits RemoveRef() { return --refCtr; }
+	virtual bool UpdateDateTimeFromHost() { return true; }
 	//--Added 2011-11-03 by Alun Bestor to let Boxer inform open file handles
 	//that their physical backing media will be removed.
-	virtual void    willBecomeUnavailable()     { }
+	virtual void willBecomeUnavailable() {}
 	//--End of modifications
 	virtual void SetFlagReadOnlyMedium() {}
+
 	void SetDrive(Bit8u drv) { hdrive=drv;}
 	Bit8u GetDrive(void) { return hdrive;}
 	Bit32u flags;
@@ -111,19 +113,23 @@ private:
 
 class DOS_Device : public DOS_File {
 public:
+	DOS_Device() : DOS_File(), devnum(0) {}
+
 	DOS_Device(const DOS_Device& orig)
 		: DOS_File(orig),
 		  devnum(orig.devnum)
 	{
 		open = true;
 	}
-	DOS_Device & operator= (const DOS_Device & orig) {
+
+	DOS_Device &operator=(const DOS_Device &orig)
+	{
 		DOS_File::operator=(orig);
-		devnum=orig.devnum;
-		open=true;
+		devnum = orig.devnum;
+		open = true;
 		return *this;
 	}
-	DOS_Device():DOS_File(),devnum(0){};
+
 	virtual bool	Read(Bit8u * data,Bit16u * size);
 	virtual bool	Write(Bit8u * data,Bit16u * size);
 	virtual bool	Seek(Bit32u * pos,Bit32u type);
@@ -174,8 +180,9 @@ public:
 	DOS_Drive_Cache& operator= (const DOS_Drive_Cache&) = delete; // prevent assignment
 	~DOS_Drive_Cache           (void);
 
-	void  SetBaseDir           (const char* path);
-	void  SetDirSort           (TDirSort sort) { sortDirType = sort; };
+	void SetBaseDir(const char *path);
+	void SetDirSort(TDirSort sort) { sortDirType = sort; }
+
 	bool  OpenDir              (const char* path, Bit16u& id);
 	bool  ReadDir              (Bit16u id, char* &result);
 
@@ -193,30 +200,32 @@ public:
 	void  DeleteEntry          (const char* path, bool ignoreLastDir = false);
 	void  EmptyCache           (void);
 
-	void  SetLabel             (const char* name,bool cdrom,bool allowupdate);
-	char* GetLabel             (void) { return label; };
+	void SetLabel(const char *name, bool cdrom, bool allowupdate);
+	const char *GetLabel() const { return label; }
 
 	class CFileInfo {
 	public:
 		CFileInfo(void)
-			: orgname{0},
-			  shortname{0},
-			  isOverlayDir(false),
-			  isDir(false),
-			  id(MAX_OPENDIRS),
-			  nextEntry(0),
-			  shortNr(0),
-			  fileList(0),
-			  longNameList(0)
+		        : orgname{0},
+		          shortname{0},
+		          isOverlayDir(false),
+		          isDir(false),
+		          id(MAX_OPENDIRS),
+		          nextEntry(0),
+		          shortNr(0),
+		          fileList(0),
+		          longNameList(0)
+		{}
+
+		virtual ~CFileInfo()
 		{
-		}
-		~CFileInfo(void) {
 			for (auto p : fileList) {
 				delete p;
 			}
 			fileList.clear();
 			longNameList.clear();
-		};
+		}
+
 		char        orgname[CROSS_LEN];
 		char        shortname[DOS_NAMELENGTH_ASCII];
 		bool        isOverlayDir;
@@ -268,7 +277,8 @@ private:
 class DOS_Drive {
 public:
 	DOS_Drive();
-	virtual ~DOS_Drive(){};
+	virtual ~DOS_Drive() = default;
+
 	virtual bool FileOpen(DOS_File * * file,char * name,Bit32u flags)=0;
 	virtual bool FileCreate(DOS_File * * file,char * name,Bit16u attributes)=0;
 	virtual bool FileUnlink(char * _name)=0;
@@ -283,8 +293,8 @@ public:
 	virtual bool FileExists(const char* name)=0;
 	virtual bool FileStat(const char* name, FileStat_Block * const stat_block)=0;
 	virtual Bit8u GetMediaByte(void)=0;
-	virtual void SetDir(const char *path) { safe_strcpy(curdir, path); };
-	virtual void EmptyCache(void) { dirCache.EmptyCache(); };
+	virtual void SetDir(const char *path) { safe_strcpy(curdir, path); }
+	virtual void EmptyCache() { dirCache.EmptyCache(); }
 	virtual bool isRemote(void)=0;
 	virtual bool isRemovable(void)=0;
 	virtual Bits UnMount(void)=0;
@@ -293,8 +303,9 @@ public:
 
 	char curdir[DOS_PATHLENGTH];
 	char info[256];
-	/* Can be overridden for example in iso images */
-	virtual char const * GetLabel(){return dirCache.GetLabel();};
+
+	// Can be overridden for example in iso images
+	virtual const char *GetLabel() { return dirCache.GetLabel(); }
 	virtual void SetLabel(const char *label, bool iscdrom, bool updatable) {};
 
 	//--Added 2009-10-25 by Alun Bestor to access the base system path for a drive
@@ -308,7 +319,7 @@ public:
 	DOS_Drive_Cache dirCache;
 
 	// disk cycling functionality (request resources)
-	virtual void Activate(void) {};
+	virtual void Activate() {}
 };
 
 enum { OPEN_READ=0, OPEN_WRITE=1, OPEN_READWRITE=2, OPEN_READ_NO_MOD=4, DOS_NOT_INHERIT=128};

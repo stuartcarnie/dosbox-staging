@@ -182,11 +182,12 @@ static_assert(offsetof(core_dynrec_t, readdata) % sizeof(uint32_t) == 0,
 
 #include "core_dynrec/decoder.h"
 
-CacheBlockDynRec * LinkBlocks(BlockReturn ret) {
-	CacheBlockDynRec * block=NULL;
+CacheBlock *LinkBlocks(BlockReturn ret)
+{
+	CacheBlock *block = NULL;
 	// the last instruction was a control flow modifying instruction
 	Bitu temp_ip=SegPhys(cs)+reg_eip;
-	CodePageHandlerDynRec * temp_handler=(CodePageHandlerDynRec *)get_tlb_readhandler(temp_ip);
+	CodePageHandler *temp_handler = (CodePageHandler *)get_tlb_readhandler(temp_ip);
 	if (temp_handler->flags & (cpu.code.big ? PFLAG_HASCODE32:PFLAG_HASCODE16)) {
 		// see if the target is an already translated block
 		block=temp_handler->FindCacheBlock(temp_ip & 4095);
@@ -218,7 +219,7 @@ Bits CPU_Core_Dynrec_Run(void) {
 			return debugCallback;
 #endif
 
-		CodePageHandlerDynRec * chandler=0;
+		CodePageHandler *chandler = 0;
 		// see if the current page is present and contains code
 		if (GCC_UNLIKELY(MakeCodePage(ip_point,chandler))) {
 			// page not present, throw the exception
@@ -230,7 +231,7 @@ Bits CPU_Core_Dynrec_Run(void) {
 		if (GCC_UNLIKELY(!chandler)) return CPU_Core_Normal_Run();
 
 		// find correct Dynamic Block to run
-		CacheBlockDynRec * block=chandler->FindCacheBlock(ip_point&4095);
+		CacheBlock *block = chandler->FindCacheBlock(ip_point & 4095);
 		if (!block) {
 			// no block found, thus translate the instruction stream
 			// unless the instruction is known to be modified

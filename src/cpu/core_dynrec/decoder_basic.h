@@ -105,13 +105,13 @@ static struct DynDecode {
 	Bit8u seg_prefix;		// segment prefix (if seg_prefix_used==true)
 
 	// block that contains the first instruction translated
-	CacheBlockDynRec * block;
+	CacheBlock *block;
 	// block that contains the current byte of the instruction stream
-	CacheBlockDynRec * active_block;
+	CacheBlock *active_block;
 
 	// the active page (containing the current byte of the instruction stream)
 	struct {
-		CodePageHandlerDynRec * code;
+		CodePageHandler *code;
 		Bitu index;		// index to the current byte of the instruction stream
 		Bit8u * wmap;	// write map that indicates code presence for every byte of this page
 		Bit8u * invmap;	// invalidation map
@@ -127,8 +127,8 @@ static struct DynDecode {
 	} modrm;
 } decode;
 
-
-static bool MakeCodePage(Bitu lin_addr,CodePageHandlerDynRec * &cph) {
+static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
+{
 	Bit8u rdval;
 	const Bitu cflag = cpu.code.big ? PFLAG_HASCODE32:PFLAG_HASCODE16;
 	//Ensure page contains memory:
@@ -137,7 +137,7 @@ static bool MakeCodePage(Bitu lin_addr,CodePageHandlerDynRec * &cph) {
 	PageHandler * handler=get_tlb_readhandler(lin_addr);
 	if (handler->flags & PFLAG_HASCODE) {
 		// this is a codepage handler, make sure it matches current code size
-		cph=(CodePageHandlerDynRec *)handler;
+		cph = (CodePageHandler *)handler;
 		if (handler->flags & cflag) return false;
 		// wrong code size/stale dynamic code, drop it
 		cph->ClearRelease();
@@ -149,7 +149,7 @@ static bool MakeCodePage(Bitu lin_addr,CodePageHandlerDynRec * &cph) {
 		if (PAGING_ForcePageInit(lin_addr)) {
 			handler=get_tlb_readhandler(lin_addr);
 			if (handler->flags & PFLAG_HASCODE) {
-				cph=(CodePageHandlerDynRec *)handler;
+				cph = (CodePageHandler *)handler;
 				if (handler->flags & cflag) return false;
 				cph->ClearRelease();
 				cph=0;
@@ -183,7 +183,7 @@ static bool MakeCodePage(Bitu lin_addr,CodePageHandlerDynRec * &cph) {
 			}
 		}
 	}
-	CodePageHandlerDynRec * cpagehandler=cache.free_pages;
+	CodePageHandler *cpagehandler = cache.free_pages;
 	cache.free_pages=cache.free_pages->next;
 
 	// adjust previous and next page pointer
@@ -209,7 +209,7 @@ static void decode_advancepage(void) {
 	Bitu faddr=decode.page.first << 12;
 	mem_readb(faddr);
 	MakeCodePage(faddr,decode.page.code);
-	CacheBlockDynRec * newblock=cache_getblock();
+	CacheBlock *newblock = cache_getblock();
 	decode.active_block->crossblock=newblock;
 	newblock->crossblock=decode.active_block;
 	decode.active_block=newblock;
@@ -262,7 +262,7 @@ static Bit32u decode_fetchd(void) {
 // codefetch functions
 static void INLINE decode_increase_wmapmask(Bitu size) {
 	Bitu mapidx;
-	CacheBlockDynRec* activecb=decode.active_block; 
+	CacheBlock *activecb = decode.active_block;
 	if (GCC_UNLIKELY(!activecb->cache.wmapmask)) {
 		// no mask memory yet allocated, start with a small buffer
 		activecb->cache.wmapmask=(Bit8u*)malloc(START_WMMEM);
