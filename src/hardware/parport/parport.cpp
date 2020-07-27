@@ -204,7 +204,7 @@ CParallel::CParallel(CommandLine* cmd, Bitu portnr, Bit8u initirq) {
 			portnr+1,base,cleft.c_str());
 	}
 #endif
-	LOG_MSG("Parallel%d: BASE %xh",portnr+1,base);
+	LOG_MSG("Parallel%" sBitfs(d) ": BASE %" sBitfs(x) "h",portnr+1,base);
 
 	for (Bitu i = 0; i < 3; i++) {
 		WriteHandler[i].Install (i + base, PARALLEL_Write, IO_MB);
@@ -291,7 +291,7 @@ public:
             }
             if (mem_readw(biosAddress) != 0)
             {
-                LOG_MSG("LPT%d already taken, skipping", i+1);
+                LOG_MSG("LPT%" sBitfs(d) " already taken, skipping", i+1);
                 continue;
             }
             //--End of modifications
@@ -342,7 +342,7 @@ public:
 			if(str=="disabled") {
 				parallelPortObjects[i] = 0;
 			} else {
-				LOG_MSG ("Invalid type for LPT%d.", i + 1);
+				LOG_MSG ("Invalid type for LPT%" sBitfs(d) ".", i + 1);
 				parallelPortObjects[i] = 0;
 			}
 		} // for lpt 1-3
